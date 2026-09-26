@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "occlusion_rl_offline"
+version = "0.1.0"
+description = "Offline teacher-scored RL for upper-jaw pose recovery"
+requires-python = ">=3.9"
+dependencies = [
+  "numpy>=1.21,<2.0",
+  "scipy>=1.7",
+  "torch>=1.9",
+  "trimesh>=4.0,<5.0"
+]
+
+[project.scripts]
+occlusion-rl = "occlusion_rl_offline.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["occlusion_rl_offline*"]
