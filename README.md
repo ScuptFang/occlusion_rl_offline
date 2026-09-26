@@ -35,7 +35,9 @@ occlusion-rl evaluate-agent --case runs/my_case/case.npz \
   --agent runs/my_case/agent/agent.pt --out runs/my_case/test
 ```
 
-`train-teacher` 先进行近/远姿态排序训练，再进行分数校准；两阶段都使用对齐病例及其随机扰动。`train-agent` 从 teacher 编码器初始化策略编码器，但 teacher 本身冻结。每步唯一的环境奖励为 `reward_scale × (teacher_score_after - teacher_score_before)`；姿态误差只用于离线评估，**不进入奖励**。两网络读取相同的 8 通道点特征：上颌 `xyz`、法线、曲率、下颌 SDF。先固定随机种子取 `candidate_points` 个点，再在网络内执行 SDF 加权 FPS 取 `fps_points` 个点；采样会偏向接触和穿透区域，同时保留空间覆盖。配置要求 teacher 与 agent 使用相同的点数与模型采样规则。
+`train-teacher` 先进行近/远姿态排序训练，再进行分数校准；两阶段都使用对齐病例及其随机扰动。`train-agent` 从 teacher 编码器初始化策略编码器，但 teacher 本身冻结。每步唯一的环境奖励为 `reward_scale × (teacher_score_after - teacher_score_before)`；真实姿态误差**不直接进入 agent 奖励**。两网络读取相同的 8 通道点特征：上颌 `xyz`、法线、曲率、下颌 SDF。先固定随机种子取 `candidate_points` 个点，再在网络内执行 SDF 加权 FPS 取 `fps_points` 个点；采样会偏向接触和穿透区域，同时保留空间覆盖。配置要求 teacher 与 agent 使用相同的点数与模型采样规则。
+
+分数校准本身使用已知正确姿态构造监督目标，因此姿态误差信息会间接进入 teacher；它不改变 agent 的分数差奖励公式。排序版和校准版的单病例对照见 [校准消融](docs/calibration_ablation.md)。
 
 `configs/default.json` 集中管理影响准确度的变量，包括 SDF 栅格间距与采样密度、咬合面带、FPS 权重和尺度、编码器宽度及邻域、teacher 的姿态分布与损失、agent 的初始扰动范围、动作步长、步数、策略宽度、探索方差、PPO 优化和评估阈值。修改模型结构参数后，须重新训练对应权重；直接加载旧权重可能因尺寸不匹配而失败，或因采样规则变化而使分数失效。每次训练保存 `config.snapshot.json`。
 
