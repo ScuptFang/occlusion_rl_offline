@@ -143,13 +143,41 @@ def evaluate(agent, task, teacher, episodes, horizon, seed,
             'success_translation_mm': success_translation_mm}
 
 
+def evaluate_cases(agent, case_paths, make_task, teacher, episodes, horizon, seed,
+                   success_rotation_deg, success_translation_mm):
+    results = [evaluate(agent, make_task(path, index), teacher, episodes, horizon,
+                        seed + index * 1009, success_rotation_deg, success_translation_mm)
+               for index, path in enumerate(case_paths)]
+    averaged = {key: float(np.mean([result[key] for result in results]))
+                for key in ('initial_rotation_deg', 'final_rotation_deg',
+                            'initial_translation_mm', 'final_translation_mm',
+                            'initial_teacher_logit', 'final_teacher_logit', 'success_rate')}
+    return {'episodes': episodes * len(case_paths), 'cases': len(case_paths), **averaged,
+            'success_rotation_deg': success_rotation_deg,
+            'success_translation_mm': success_translation_mm}
+
+
 def train(args):
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model_options = json.loads(args.model_options)
-    task = PoseTask(args.case, args.points, args.seed, args.max_rotation, args.max_translation,
-                    device, args.rotation_step_deg, args.translation_step_mm, args.point_seed)
+    train_cases = json.loads(args.train_cases) if args.train_cases else [args.case]
+    eval_paths = json.loads(args.eval_cases) if args.eval_cases else [args.case]
+    if not train_cases or not eval_paths:
+        raise ValueError('Train and evaluation case lists must be nonempty')
+    if not args.eval_only and args.iterations < len(train_cases):
+        raise ValueError('agent.iterations must be at least the number of training cases')
+
+    def make_task(path, index):
+        return PoseTask(path, args.points, args.seed, args.max_rotation, args.max_translation,
+                        device, args.rotation_step_deg, args.translation_step_mm,
+                        args.point_seed + index * 1009)
+
+    def evaluate_split(seed):
+        return evaluate_cases(agent, eval_paths, make_task, teacher,
+                              args.eval_episodes, args.horizon, seed,
+                              args.success_rotation_deg, args.success_translation_mm)
     teacher = load_teacher(args.teacher, device, args.teacher_samples, **model_options)
     agent = Agent(args.teacher_samples, args.policy_width, args.initial_log_std,
                   **model_options).to(device)
@@ -160,9 +188,7 @@ def train(args):
         # encoder is then updated by PPO, while the scoring teacher stays frozen.
         agent.encoder.load_state_dict(teacher.state_dict())
     if args.eval_only:
-        result = evaluate(agent, task, teacher, args.eval_episodes, args.horizon,
-                          args.seed + args.eval_seed_offset,
-                          args.success_rotation_deg, args.success_translation_mm)
+        result = evaluate_split(args.seed + args.eval_seed_offset)
         print(json.dumps({'stage': 'evaluation', **result}), flush=True)
         out = Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
@@ -171,13 +197,12 @@ def train(args):
     optimizer = torch.optim.Adam(agent.parameters(), lr=args.lr)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    baseline = evaluate(agent, task, teacher, args.eval_episodes, args.horizon,
-                        args.seed + args.validation_seed_offset,
-                        args.success_rotation_deg, args.success_translation_mm)
+    baseline = evaluate_split(args.seed + args.validation_seed_offset)
     print(json.dumps({'stage': 'untrained', **baseline}), flush=True)
     best_score_gain = float('-inf')
     history = []
     for iteration in range(args.iterations):
+        task = make_task(train_cases[iteration % len(train_cases)], iteration % len(train_cases))
         task.rng = np.random.RandomState(args.seed + iteration * 1009)
         rotations, translations, points = task.reset(args.envs)
         scores = teacher_score(teacher, points, device)
@@ -221,9 +246,7 @@ def train(args):
                 nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
                 optimizer.step()
         if (iteration + 1) % args.log_every == 0 or iteration + 1 == args.iterations:
-            result = evaluate(agent, task, teacher, args.eval_episodes, args.horizon,
-                              args.seed + args.validation_seed_offset,
-                              args.success_rotation_deg, args.success_translation_mm)
+            result = evaluate_split(args.seed + args.validation_seed_offset)
             record = {'stage': 'train', 'iteration': iteration + 1,
                       'reward': float(torch.stack([x[4] for x in rollout]).mean()), **result}
             history.append(record)
@@ -242,6 +265,8 @@ def train(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case', default=str(REPO_ROOT / 'examples/data/case.npz'))
+    parser.add_argument('--train-cases', default=None, help='JSON array of training case paths')
+    parser.add_argument('--eval-cases', default=None, help='JSON array of validation or test case paths')
     parser.add_argument('--teacher', default=str(REPO_ROOT / 'examples/checkpoints/teacher.pt'))
     parser.add_argument('--out', default=str(REPO_ROOT / 'runs/default/agent'))
     parser.add_argument('--checkpoint', default=None)

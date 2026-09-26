@@ -1,6 +1,7 @@
 """Calibrate the case teacher's logit to a continuous synthetic pose-quality score."""
 import argparse
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -9,7 +10,7 @@ from scipy.spatial.transform import Rotation
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-from .data import PoseDataset
+from .data import PoseDataset, CaseBlockSampler
 from .config import REPO_ROOT
 from .model import OcclusionTeacher
 
@@ -17,8 +18,11 @@ from .model import OcclusionTeacher
 class PoseScoreDataset(Dataset):
     def __init__(self, case, count, points, seed, bands=None,
                  quality_rotation_scale_deg=8.0, quality_translation_scale_mm=4.0):
-        self.poses = PoseDataset([case], points, 1, seed)
+        self.poses = PoseDataset(case if isinstance(case, (list, tuple)) else [case], points, 1, seed)
         self.count, self.seed, self.epoch = count, seed, 0
+        if count < len(self.poses.paths):
+            raise ValueError('Pose count must cover every case at least once')
+        self.case_block_size = math.ceil(count / len(self.poses.paths))
         self.bands = bands or [
             {'probability': .2, 'rotation_deg': 1.5, 'translation_mm': .75},
             {'probability': .5, 'rotation_deg': 8.0, 'translation_mm': 4.0},
@@ -39,7 +43,8 @@ class PoseScoreDataset(Dataset):
         item_seed = self.seed + self.epoch * 1000003 + index
         points_rng = np.random.RandomState(item_seed)
         pose_rng = np.random.RandomState(item_seed + 1000000000)
-        case = self.poses.cases[0]
+        case = self.poses.case(min(index * len(self.poses.paths) // self.count,
+                                   len(self.poses.paths) - 1))
         ids = points_rng.choice(len(case['xyz']), self.poses.points, replace=len(case['xyz']) < self.poses.points)
         # Cover near, initial and reachable states, including poses an agent
         # might visit after moving away from the original orientation.
@@ -76,6 +81,8 @@ def evaluate(model, loader, device):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case', default=str(REPO_ROOT / 'examples/data/case.npz'))
+    parser.add_argument('--train-cases', default=None, help='JSON array of training case paths')
+    parser.add_argument('--val-cases', default=None, help='JSON array of validation case paths')
     parser.add_argument('--source', default=str(REPO_ROOT / 'examples/checkpoints/teacher_ranking.pt'))
     parser.add_argument('--out', default=str(REPO_ROOT / 'runs/default/teacher/calibration'))
     parser.add_argument('--epochs', type=int, default=30)
@@ -103,9 +110,12 @@ def main():
     data_options = {'bands': json.loads(args.pose_bands) if args.pose_bands else None,
                     'quality_rotation_scale_deg': args.quality_rotation_scale_deg,
                     'quality_translation_scale_mm': args.quality_translation_scale_mm}
-    train = PoseScoreDataset(args.case, args.train_count, args.points, args.seed,
+    train_cases = json.loads(args.train_cases) if args.train_cases else [args.case]
+    val_cases = json.loads(args.val_cases) if args.val_cases else [args.case]
+    train = PoseScoreDataset(train_cases, args.train_count, args.points, args.seed,
                              **data_options)
-    validation = PoseScoreDataset(args.case, args.val_count, args.points,
+    train_sampler = CaseBlockSampler(len(train), train.case_block_size, args.seed)
+    validation = PoseScoreDataset(val_cases, args.val_count, args.points,
                                   args.seed + 100000, **data_options)
     val_loader = DataLoader(validation, batch_size=args.batch)
     out = Path(args.out)
@@ -114,9 +124,10 @@ def main():
     history = []
     for epoch in range(args.epochs):
         train.set_epoch(epoch)
+        train_sampler.set_epoch(epoch)
         model.train()
         losses = []
-        for x, y in DataLoader(train, batch_size=args.batch, shuffle=True):
+        for x, y in DataLoader(train, batch_size=args.batch, sampler=train_sampler):
             prediction = model(x.to(device))
             loss = nn.functional.smooth_l1_loss(prediction, y.to(device),
                                                 beta=args.smooth_l1_beta)
@@ -133,7 +144,8 @@ def main():
         if metrics['mae'] < best:
             best = metrics['mae']
             torch.save({'model': model.state_dict(), 'samples': args.samples,
-                        'epoch': epoch + 1, 'case': str(args.case)}, out / 'best.pt')
+                        'epoch': epoch + 1, 'train_cases': train_cases,
+                        'validation_cases': val_cases}, out / 'best.pt')
             (out / 'validation.json').write_text(json.dumps(metrics, indent=2))
 
 

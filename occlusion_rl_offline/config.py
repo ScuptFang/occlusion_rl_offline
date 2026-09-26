@@ -12,6 +12,9 @@ def load_config(path=None):
     if not config_path.is_absolute():
         config_path = REPO_ROOT / config_path
     config = json.loads(config_path.read_text())
+    config.setdefault('cohort', {'upper_filename': 'upper.stl', 'lower_filename': 'lower.stl',
+                                 'split_seed': 42, 'validation_fraction': 0.1,
+                                 'test_fraction': 0.1})
     for section in ('paths', 'prepare', 'model', 'teacher', 'agent', 'inference'):
         if section not in config:
             raise ValueError('Missing config section: %s' % section)

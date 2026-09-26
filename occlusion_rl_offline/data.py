@@ -1,7 +1,8 @@
 from pathlib import Path
+from functools import lru_cache
 import numpy as np
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Sampler
 from scipy.ndimage import map_coordinates
 
 
@@ -39,8 +40,8 @@ class PoseDataset(Dataset):
     def __init__(self, paths, points=1024, repeats=64, seed=42,
                  near_translation_mm=0.1, near_rotation_deg=0.2,
                  far_magnitude_min=0.35, far_magnitude_max=2.0):
-        self.cases = [load_case(p) for p in paths]
-        if not self.cases:
+        self.paths = [Path(p) for p in paths]
+        if not self.paths:
             raise ValueError('No .npz cases found')
         self.points, self.repeats, self.seed, self.epoch = points, repeats, seed, 0
         self.near_translation_mm = near_translation_mm
@@ -49,7 +50,12 @@ class PoseDataset(Dataset):
         self.far_magnitude_max = far_magnitude_max
 
     def __len__(self):
-        return len(self.cases) * self.repeats
+        return len(self.paths) * self.repeats
+
+    @lru_cache(maxsize=2)
+    def case(self, index):
+        # A full SDF grid can be tens of MB; keep only two cases in memory.
+        return load_case(self.paths[index])
 
     def set_epoch(self, epoch):
         self.epoch = epoch
@@ -68,7 +74,7 @@ class PoseDataset(Dataset):
         item_seed = self.seed + self.epoch * 1000003 + index
         points_rng = np.random.RandomState(item_seed)
         pose_rng = np.random.RandomState(item_seed + 1000000000)
-        case = self.cases[index // self.repeats]
+        case = self.case(index // self.repeats)
         ids = points_rng.choice(len(case['xyz']), self.points, replace=len(case['xyz']) < self.points)
         # Near-equivalent poses vs a farther pose. Magnitude determines pair only,
         # not an artificially calibrated continuous clinical quality score.
@@ -80,3 +86,26 @@ class PoseDataset(Dataset):
         bad_t = (direction[:3] * magnitude * np.sqrt(6)).astype(np.float32)
         bad_r = (direction[3:] * magnitude * np.sqrt(6)).astype(np.float32)
         return self.pose(case, ids, good_t, good_r), self.pose(case, ids, bad_t, bad_r)
+
+
+class CaseBlockSampler(Sampler):
+    """Shuffle case order while keeping each case's samples adjacent for SDF caching."""
+    def __init__(self, length, block_size, seed=42):
+        self.length, self.block_size, self.seed, self.epoch = length, block_size, seed, 0
+        if length < 1 or block_size < 1:
+            raise ValueError('Sampler length and block size must be positive')
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch
+
+    def __len__(self):
+        return self.length
+
+    def __iter__(self):
+        rng = np.random.RandomState(self.seed + self.epoch)
+        starts = list(range(0, self.length, self.block_size))
+        rng.shuffle(starts)
+        for start in starts:
+            block = np.arange(start, min(start + self.block_size, self.length))
+            rng.shuffle(block)
+            yield from block.tolist()

@@ -22,6 +22,8 @@ occlusion-rl prepare --out runs/my_case/case.npz
 occlusion-rl inspect-data --case runs/my_case/case.npz
 ```
 
+多病例训练可用 `prepare-batch` 从 `case_id/upper.stl`、`case_id/lower.stl` 目录批量建立数据与 train/val/test 清单；已有 `case_id/case.npz` 则用 `index-cases`。完整目录格式、训练命令和病例划分规则见 [大量病例数据输入](docs/multiple_cases.md)。
+
 `prepare` 从上颌咬合面带采样点，提取坐标、面法线、局部法线变化量（曲率代理值），并由下颌网格生成 SDF。当前 STL 不是封闭网格，SDF 使用下颌表面采样点的最近邻距离和对应面法线估计符号；`*.audit.json` 会记录参数和抽样统计。新病例应检查法线方向与 SDF 符号，再重新训练权重；附带的权重只在附带病例上验证过。
 
 ## 训练与评估

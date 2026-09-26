@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from .config import load_config, resolve
+from .cohort import index_prepared, prepare_batch, read_manifest
 from .data import load_case, sample_sdf
 from .inference import infer_agent, score_case
 from .prepare import prepare_case
@@ -41,7 +42,8 @@ def _agent_checkpoint(config, override):
     return trained if trained.exists() else resolve(config['paths']['packaged_agent'])
 
 
-def _agent_args(config, case, teacher, out, eval_only=False, checkpoint=None):
+def _agent_args(config, case, teacher, out, eval_only=False, checkpoint=None,
+                train_cases=None, eval_cases=None):
     a = config['agent']
     command = ['--case', case, '--teacher', teacher, '--out', out,
                '--points', a['candidate_points'], '--teacher-samples', a['fps_points'],
@@ -71,6 +73,10 @@ def _agent_args(config, case, teacher, out, eval_only=False, checkpoint=None):
         command += ['--eval-episodes', a['validation_episodes']]
         if checkpoint:
             command += ['--checkpoint', checkpoint]
+    if train_cases is not None:
+        command += ['--train-cases', json.dumps([str(x) for x in train_cases])]
+    if eval_cases is not None:
+        command += ['--eval-cases', json.dumps([str(x) for x in eval_cases])]
     return command
 
 
@@ -83,6 +89,13 @@ def main():
     prepare.add_argument('--upper', default=None)
     prepare.add_argument('--lower', default=None)
     prepare.add_argument('--out', default=None)
+    batch = subs.add_parser('prepare-batch', help='Prepare case_id/upper.stl and lower.stl folders')
+    batch.add_argument('--input-dir', required=True)
+    batch.add_argument('--out', default=None)
+    batch.add_argument('--skip-existing', action='store_true')
+    index = subs.add_parser('index-cases', help='Manifest from existing case_id/case.npz folders')
+    index.add_argument('--input-dir', required=True)
+    index.add_argument('--out', default=None)
     inspect = subs.add_parser('inspect-data', help='Validate a prepared case and print SDF statistics')
     inspect.add_argument('--case', default=None)
     perturb = subs.add_parser('perturb', help='Make a posed upper case for offline inference testing')
@@ -93,10 +106,12 @@ def main():
     perturb.add_argument('--translation-mm', nargs=3, type=float, required=True)
     teacher = subs.add_parser('train-teacher', help='Train ranking and calibrated teacher')
     teacher.add_argument('--case', default=None)
+    teacher.add_argument('--manifest', default=None)
     teacher.add_argument('--source', default=None)
     teacher.add_argument('--out', default=None)
     agent = subs.add_parser('train-agent', help='Train PPO with teacher-score delta as sole reward')
     agent.add_argument('--case', default=None)
+    agent.add_argument('--manifest', default=None)
     agent.add_argument('--teacher', default=None)
     agent.add_argument('--out', default=None)
     agent.add_argument('--checkpoint', default=None, help='Optional agent checkpoint to initialize from')
@@ -105,6 +120,7 @@ def main():
     score.add_argument('--teacher', default=None)
     evaluate = subs.add_parser('evaluate-agent', help='Evaluate new perturbations of an aligned case')
     evaluate.add_argument('--case', default=None)
+    evaluate.add_argument('--manifest', default=None)
     evaluate.add_argument('--teacher', default=None)
     evaluate.add_argument('--agent', default=None)
     evaluate.add_argument('--out', default=None)
@@ -119,12 +135,30 @@ def main():
     config = load_config(args.config)
     case = _path(getattr(args, 'case', None), config['paths']['case'])
     run_dir = resolve(config['paths']['run_dir'])
+    if getattr(args, 'manifest', None) and getattr(args, 'case', None):
+        parser.error('Use either --case or --manifest, not both')
+    cohort = read_manifest(resolve(args.manifest)) if getattr(args, 'manifest', None) else None
     if args.command == 'prepare':
         upper = _path(args.upper, config['paths']['upper_stl'])
         lower = _path(args.lower, config['paths']['lower_stl'])
         out = _path(args.out, run_dir / 'prepared/case.npz')
         _, audit = prepare_case(upper, lower, out, config['prepare'])
         print(json.dumps({'case': str(out), 'audit': audit}, indent=2))
+    elif args.command == 'prepare-batch':
+        c = config['cohort']
+        out = _path(args.out, run_dir / 'cohort')
+        manifest, counts = prepare_batch(resolve(args.input_dir), out, config['prepare'],
+                                         c['upper_filename'], c['lower_filename'],
+                                         c['split_seed'], c['validation_fraction'],
+                                         c['test_fraction'], args.skip_existing)
+        print(json.dumps({'manifest': str(manifest), 'counts': counts}, indent=2))
+    elif args.command == 'index-cases':
+        c = config['cohort']
+        out = _path(args.out, run_dir / 'cohort/manifest.json')
+        manifest, counts = index_prepared(resolve(args.input_dir), out,
+                                          c['split_seed'], c['validation_fraction'],
+                                          c['test_fraction'])
+        print(json.dumps({'manifest': str(manifest), 'counts': counts}, indent=2))
     elif args.command == 'inspect-data':
         data = load_case(case)
         probe = sample_sdf(data['sdf_grid'], data['origin'], data['spacing'],
@@ -148,9 +182,13 @@ def main():
         calibrated = out / 'calibration'
         source = _path(args.source, config['paths']['initial_teacher'])
         model_options = json.dumps(config['model'])
+        split_args = (['--train-cases', json.dumps([str(x) for x in cohort['train']]),
+                       '--val-cases', json.dumps([str(x) for x in cohort['val']])]
+                      if cohort else [])
         _run('occlusion_rl_offline.train_case_teacher',
              ['--case', case, '--source', source, '--out', rank,
               '--epochs', t['ranking_epochs'], '--repeats', t['ranking_pairs_per_epoch'],
+              '--validation-repeats', t.get('ranking_validation_pairs_per_case', 128),
               '--points', t['candidate_points'], '--samples', t['fps_points'],
               '--batch', t['ranking_batch'], '--lr', t['ranking_lr'], '--seed', t['seed'],
               '--weight-decay', t['ranking_weight_decay'],
@@ -160,7 +198,8 @@ def main():
               '--far-magnitude-max', t['ranking_far_magnitude_max'],
               '--margin', t['ranking_margin'],
               '--anchor-weight', t['ranking_anchor_weight'],
-              '--model-options', model_options])
+              '--model-options', model_options] + split_args +
+             (['--from-scratch'] if cohort and args.source is None else []))
         _run('occlusion_rl_offline.calibrate_teacher',
              ['--case', case, '--source', rank / 'best.pt', '--out', calibrated,
               '--epochs', t['calibration_epochs'],
@@ -174,7 +213,7 @@ def main():
               '--pose-bands', json.dumps(t['calibration_pose_bands']),
               '--quality-rotation-scale-deg', t['quality_rotation_scale_deg'],
               '--quality-translation-scale-mm', t['quality_translation_scale_mm'],
-              '--seed', t['seed'], '--model-options', model_options])
+              '--seed', t['seed'], '--model-options', model_options] + split_args)
         print(json.dumps({'ranking_checkpoint': str(rank / 'best.pt'),
                           'teacher_checkpoint': str(calibrated / 'best.pt')}))
     elif args.command == 'train-agent':
@@ -182,7 +221,9 @@ def main():
         _snapshot(out, config)
         teacher_path = _teacher_checkpoint(config, args.teacher)
         command = _agent_args(config, case, teacher_path, out,
-                              checkpoint=resolve(args.checkpoint) if args.checkpoint else None)
+                              checkpoint=resolve(args.checkpoint) if args.checkpoint else None,
+                              train_cases=cohort['train'] if cohort else None,
+                              eval_cases=cohort['val'] if cohort else None)
         _run('occlusion_rl_offline.rl', command)
         print(json.dumps({'agent_checkpoint': str(out / 'agent.pt'),
                           'teacher_checkpoint': str(teacher_path)}))
@@ -195,7 +236,7 @@ def main():
         agent_path = _agent_checkpoint(config, args.agent)
         _run('occlusion_rl_offline.rl',
              _agent_args(config, case, teacher_path, out, eval_only=True,
-                         checkpoint=agent_path))
+                         checkpoint=agent_path, eval_cases=cohort['test'] if cohort else None))
     elif args.command == 'infer-agent':
         teacher_path = _teacher_checkpoint(config, args.teacher)
         agent_path = _agent_checkpoint(config, args.agent)

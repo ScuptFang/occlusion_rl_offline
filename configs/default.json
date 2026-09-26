@@ -8,6 +8,13 @@
     "packaged_agent": "examples/checkpoints/agent.pt",
     "run_dir": "runs/default"
   },
+  "cohort": {
+    "upper_filename": "upper.stl",
+    "lower_filename": "lower.stl",
+    "split_seed": 42,
+    "validation_fraction": 0.1,
+    "test_fraction": 0.1
+  },
   "prepare": {
     "upper_surface_points": 21367,
     "occlusal_axis": 2,
@@ -34,6 +41,7 @@
     "fps_points": 64,
     "ranking_epochs": 80,
     "ranking_pairs_per_epoch": 256,
+    "ranking_validation_pairs_per_case": 128,
     "ranking_batch": 8,
     "ranking_lr": 0.0001,
     "ranking_weight_decay": 0.0001,
