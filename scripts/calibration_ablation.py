@@ -19,15 +19,16 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     torch.manual_seed(20260927)
     continuous = PoseScoreDataset(
-        case, 512, teacher_cfg['candidate_points'], 20260927,
+        case, 512, teacher_cfg['fps_points'], 20260927,
         teacher_cfg['calibration_pose_bands'],
         teacher_cfg['quality_rotation_scale_deg'],
-        teacher_cfg['quality_translation_scale_mm'])
-    pairs = PoseDataset([case], teacher_cfg['candidate_points'], 512, 20260928,
+        teacher_cfg['quality_translation_scale_mm'], cfg['model'])
+    pairs = PoseDataset([case], teacher_cfg['fps_points'], 512, 20260928,
                         near_translation_mm=teacher_cfg['ranking_near_translation_mm'],
                         near_rotation_deg=teacher_cfg['ranking_near_rotation_deg'],
                         far_magnitude_min=teacher_cfg['ranking_far_magnitude_min'],
-                        far_magnitude_max=teacher_cfg['ranking_far_magnitude_max'])
+                        far_magnitude_max=teacher_cfg['ranking_far_magnitude_max'],
+                        fps_options=cfg['model'])
     out = {}
     for name, checkpoint in (
         ('ranking_only', 'examples/checkpoints/teacher_ranking.pt'),

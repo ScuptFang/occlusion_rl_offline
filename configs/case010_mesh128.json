@@ -1,0 +1,131 @@
+{
+  "paths": {
+    "case": "examples/data/case.npz",
+    "upper_stl": "examples/data/upper.stl",
+    "lower_stl": "examples/data/lower.stl",
+    "initial_teacher": "examples/checkpoints/teacher_initial.pt",
+    "packaged_teacher": "examples/checkpoints/teacher.pt",
+    "packaged_agent": "examples/checkpoints/agent.pt",
+    "run_dir": "runs/case010_mesh128_20260930"
+  },
+  "cohort": {
+    "upper_filename": "upper.stl",
+    "lower_filename": "lower.stl",
+    "split_seed": 42,
+    "validation_fraction": 0.17,
+    "test_fraction": 0.17
+  },
+  "prepare": {
+    "seed": 42
+  },
+  "model": {
+    "width": 64,
+    "k": 16,
+    "encoder_layers": 3,
+    "fps_strength": 1.5,
+    "contact_scales": [
+      0.15,
+      0.6,
+      1.5
+    ],
+    "weight_floor": 0.15,
+    "contact_threshold": 0.15,
+    "penetration_threshold": -0.1,
+    "stat_clip_mm": 3.0
+  },
+  "teacher": {
+    "fps_points": 128,
+    "ranking_epochs": 8,
+    "ranking_pairs_per_epoch": 16,
+    "ranking_validation_pairs_per_case": 16,
+    "ranking_batch": 4,
+    "ranking_lr": 0.0001,
+    "ranking_weight_decay": 0.0001,
+    "ranking_near_translation_mm": 0.1,
+    "ranking_near_rotation_deg": 0.2,
+    "ranking_far_magnitude_min": 0.35,
+    "ranking_far_magnitude_max": 2.0,
+    "ranking_margin": 0.5,
+    "ranking_anchor_weight": 0.1,
+    "calibration_epochs": 8,
+    "calibration_poses_per_epoch": 48,
+    "calibration_validation_poses": 32,
+    "calibration_batch": 4,
+    "calibration_lr": 0.0001,
+    "calibration_weight_decay": 0.0001,
+    "calibration_smooth_l1_beta": 0.5,
+    "calibration_max_grad_norm": 1.0,
+    "calibration_pose_bands": [
+      {
+        "probability": 0.2,
+        "rotation_deg": 1.5,
+        "translation_mm": 0.75
+      },
+      {
+        "probability": 0.5,
+        "rotation_deg": 8.0,
+        "translation_mm": 4.0
+      },
+      {
+        "probability": 0.3,
+        "rotation_deg": 20.0,
+        "translation_mm": 8.0
+      }
+    ],
+    "quality_rotation_scale_deg": 8.0,
+    "quality_translation_scale_mm": 4.0,
+    "seed": 42
+  },
+  "agent": {
+    "fps_points": 128,
+    "seed": 42,
+    "start_rotation_deg": 8.0,
+    "start_translation_mm": 4.0,
+    "action_rotation_step_deg": 2.0,
+    "action_translation_step_mm": 0.4,
+    "horizon": 8,
+    "parallel_envs": 2,
+    "iterations": 40,
+    "ppo_epochs": 2,
+    "minibatch": 16,
+    "learning_rate": 0.0001,
+    "policy_width": 128,
+    "initial_log_std": -0.5,
+    "ppo_clip": 0.2,
+    "value_coef": 0.5,
+    "entropy_coef": 0.001,
+    "max_grad_norm": 1.0,
+    "reward_scale": 1.0,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "validation_episodes": 8,
+    "test_episodes": 32,
+    "validation_seed_offset": 100000,
+    "test_seed_offset": 200000,
+    "log_every": 5,
+    "success_rotation_deg": 1.5,
+    "success_translation_mm": 0.5,
+    "score_gated_actions": false,
+    "training_pose_bands": [
+      {
+        "probability": 0.3,
+        "rotation_deg": 1.5,
+        "translation_mm": 0.5
+      },
+      {
+        "probability": 0.3,
+        "rotation_deg": 4.0,
+        "translation_mm": 2.0
+      },
+      {
+        "probability": 0.4,
+        "rotation_deg": 8.0,
+        "translation_mm": 4.0
+      }
+    ]
+  },
+  "inference": {
+    "steps": 16,
+    "out_dir": "runs/inference"
+  }
+}

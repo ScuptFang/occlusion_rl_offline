@@ -18,13 +18,43 @@ def load_config(path=None):
     for section in ('paths', 'prepare', 'model', 'teacher', 'agent', 'inference'):
         if section not in config:
             raise ValueError('Missing config section: %s' % section)
+    layers = config['model'].get('encoder_layers', 3)
+    if isinstance(layers, bool) or not isinstance(layers, int) or layers < 1:
+        raise ValueError('model.encoder_layers must be a positive integer')
     for stage in ('teacher', 'agent'):
         values = config[stage]
-        if not 0 < values['fps_points'] <= values['candidate_points']:
-            raise ValueError('%s.fps_points must be in (0, candidate_points]' % stage)
-    if config['teacher']['candidate_points'] != config['agent']['candidate_points'] or \
-            config['teacher']['fps_points'] != config['agent']['fps_points']:
+        if not isinstance(values['fps_points'], int) or values['fps_points'] < 1:
+            raise ValueError('%s.fps_points must be a positive integer' % stage)
+    if config['teacher']['fps_points'] != config['agent']['fps_points']:
         raise ValueError('Teacher and agent point densities must match for this experiment')
+    candidates = config['model'].get('candidate_points', 4096)
+    if config['model'].get('sampling_mode','dynamic') not in ('dynamic','episode_fixed'):
+        raise ValueError('model.sampling_mode must be dynamic or episode_fixed')
+    if isinstance(candidates, bool) or not isinstance(candidates, int) or candidates < config['teacher']['fps_points']:
+        raise ValueError('model.candidate_points must be an integer >= fps_points')
+    fraction = config['model'].get('contact_fps_fraction', 0.0)
+    if not isinstance(fraction, (int, float)) or isinstance(fraction, bool) or not 0 <= fraction <= 1:
+        raise ValueError('model.contact_fps_fraction must be between 0 and 1')
+    pool_factor = config['model'].get('contact_fps_pool_factor', 4)
+    if fraction and (config['model'].get('contact_fps_max_mm', 0.6) <= 0 or
+                     isinstance(pool_factor, bool) or not isinstance(pool_factor, int) or pool_factor < 1):
+        raise ValueError('Contact FPS threshold and pool factor must be positive')
+    a = config['agent']
+    if a.get('trainer') == 'continuous':
+        if a.get('score_gated_actions', False):
+            raise ValueError('Continuous PPO must execute score-decreasing actions')
+        if a.get('reward_scale', 1) <= 0 or not 0 < a.get('gamma', 1) <= 1:
+            raise ValueError('Positive reward scale and gamma in (0,1] required')
+        if len(a.get('error_scales', [8., 4.])) != 2 or min(a.get('error_scales', [8., 4.])) <= 0:
+            raise ValueError('Two positive continuous error scales required')
+        previous = 0
+        for stage in a.get('action_schedule', []):
+            if stage['until_step'] <= previous or min(stage['rotation_deg'], stage['translation_mm']) <= 0:
+                raise ValueError('Action schedule requires increasing steps and positive scales')
+            previous = stage['until_step']
+        for key in ('horizon', 'parallel_envs', 'iterations', 'ppo_epochs', 'minibatch', 'log_every'):
+            if not isinstance(a[key], int) or a[key] < 1:
+                raise ValueError('agent.%s must be a positive integer' % key)
     return config
 
 

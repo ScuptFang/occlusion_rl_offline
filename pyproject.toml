@@ -17,5 +17,8 @@ dependencies = [
 [project.scripts]
 occlusion-rl = "occlusion_rl_offline.cli:main"
 
+[project.optional-dependencies]
+report = ["matplotlib>=3.7,<3.10"]
+
 [tool.setuptools.packages.find]
 include = ["occlusion_rl_offline*"]

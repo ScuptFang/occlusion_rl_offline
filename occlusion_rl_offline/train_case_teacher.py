@@ -1,4 +1,5 @@
 """Fine-tune the ranking teacher for the one aligned case used by the RL task."""
+from .runtime import resolve_device
 import argparse
 import json
 from pathlib import Path
@@ -24,7 +25,7 @@ def main():
     parser.add_argument('--repeats', type=int, default=256)
     parser.add_argument('--validation-repeats', type=int, default=128)
     parser.add_argument('--points', type=int, default=128)
-    parser.add_argument('--samples', type=int, default=32)
+    parser.add_argument('--samples', type=int, default=128)
     parser.add_argument('--batch', type=int, default=8)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--weight-decay', type=float, default=1e-4)
@@ -32,14 +33,17 @@ def main():
     parser.add_argument('--near-rotation-deg', type=float, default=0.2)
     parser.add_argument('--far-magnitude-min', type=float, default=0.35)
     parser.add_argument('--far-magnitude-max', type=float, default=2.0)
+    parser.add_argument('--ranking-pose-bands', default=None, help='Ordered JSON pose-magnitude bands')
     parser.add_argument('--margin', type=float, default=0.5)
     parser.add_argument('--anchor-weight', type=float, default=0.1)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--model-options', default='{}', help='JSON keyword arguments for OcclusionTeacher')
+    parser.add_argument('--device', default=None)
     args = parser.parse_args()
     torch.manual_seed(args.seed)
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = OcclusionTeacher(sample_count=args.samples, **json.loads(args.model_options)).to(device)
+    device = resolve_device(override=getattr(args,'device',None))
+    model_options = json.loads(args.model_options)
+    model = OcclusionTeacher(sample_count=args.samples, **model_options).to(device)
     if not args.from_scratch:
         source = torch.load(args.source, map_location=device)
         model.load_state_dict(source['model'])
@@ -47,7 +51,9 @@ def main():
     data_options = {'near_translation_mm': args.near_translation_mm,
                     'near_rotation_deg': args.near_rotation_deg,
                     'far_magnitude_min': args.far_magnitude_min,
-                    'far_magnitude_max': args.far_magnitude_max}
+                    'far_magnitude_max': args.far_magnitude_max,
+                    'ranking_pose_bands': json.loads(args.ranking_pose_bands) if args.ranking_pose_bands else None,
+                    'fps_options': model_options}
     train_cases = json.loads(args.train_cases) if args.train_cases else [args.case]
     val_cases = json.loads(args.val_cases) if args.val_cases else [args.case]
     train = PoseDataset(train_cases, args.points, args.repeats, args.seed, **data_options)
@@ -57,6 +63,7 @@ def main():
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     best = float('-inf')
+    best_loss = float('inf')
     history = []
     for epoch in range(args.epochs):
         train.set_epoch(epoch)
@@ -69,9 +76,9 @@ def main():
         history.append(result)
         (out / 'history.json').write_text(json.dumps(history, indent=2))
         print(json.dumps(result), flush=True)
-        if va['pair_accuracy'] > best:
-            best = va['pair_accuracy']
-            torch.save({'model': model.state_dict(), 'samples': args.samples, 'epoch': epoch + 1,
+        if va['pair_accuracy'] > best or (va['pair_accuracy'] == best and va['loss'] < best_loss):
+            best, best_loss = va['pair_accuracy'], va['loss']
+            torch.save({'model': model.state_dict(), 'samples': args.samples, 'model_options': model_options, 'epoch': epoch + 1,
                         'train_cases': train_cases, 'validation_cases': val_cases}, out / 'best.pt')
 
 

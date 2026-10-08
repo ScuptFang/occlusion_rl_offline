@@ -1,4 +1,5 @@
 """Single-case PPO pose recovery rewarded only by teacher-score change."""
+from .runtime import resolve_device
 import argparse
 import json
 from pathlib import Path
@@ -9,45 +10,74 @@ from scipy.spatial.transform import Rotation
 from torch import nn
 from torch.distributions import Normal
 
-from .data import load_case, sample_sdf
+from .data import load_case, sample_upper_mesh, candidate_indices, sample_sdf
 from .config import REPO_ROOT
 from .model import OcclusionTeacher
 
 
 class PoseTask:
     def __init__(self, case, points, seed, max_rotation, max_translation, device,
-                 rotation_step_deg=2.0, translation_step_mm=0.4, point_seed=None):
+                 rotation_step_deg=2.0, translation_step_mm=0.4, fps_options=None):
         self.case = load_case(case)
         self.rng = np.random.RandomState(seed)
-        point_rng = np.random.RandomState(seed if point_seed is None else point_seed)
-        self.ids = point_rng.choice(len(self.case['xyz']), points, replace=len(self.case['xyz']) < points)
-        self.xyz = self.case['xyz'][self.ids]
-        self.normal = self.case['normal'][self.ids]
-        self.curvature = self.case['curvature'][self.ids].reshape(-1)
+        self.xyz = self.case['xyz']
+        self.normal = self.case['normal']
+        self.points = points
+        self.fps_options = fps_options
         self.pivot = self.case['xyz'].mean(0)
         self.max_rotation, self.max_translation = max_rotation, max_translation
         self.rotation_step_deg, self.translation_step_mm = rotation_step_deg, translation_step_mm
         self.device = device
+        self.episode_ids = None
+
+    def begin_episode(self):
+        self.episode_ids = None
 
     def points_at(self, rotations, translations):
-        xyz = np.einsum('nj,bij->bni', self.xyz - self.pivot, rotations) + self.pivot + translations[:, None]
-        normals = np.einsum('nj,bij->bni', self.normal, rotations)
-        features = []
-        for x, normal in zip(xyz, normals):
-            d = sample_sdf(self.case['sdf_grid'], self.case['origin'], self.case['spacing'], x)
-            features.append(np.column_stack((x, normal, self.curvature, d)))
+        fixed = (self.fps_options or {}).get('sampling_mode') == 'episode_fixed'
+        if fixed and self.episode_ids is not None:
+            if len(self.episode_ids) != len(rotations):
+                raise ValueError('Call begin_episode before changing fixed-ID batch size')
+            xyz = (np.einsum('bnj,bij->bni', self.xyz[self.episode_ids] - self.pivot, rotations)
+                   + self.pivot + translations[:, None]).astype(np.float32)
+            normal = np.einsum('bnj,bij->bni', self.normal[self.episode_ids], rotations)
+            distances = sample_sdf(self.case, xyz.reshape(-1, 3)).reshape(len(rotations), -1)
+            self.last_ids = self.episode_ids
+            return np.concatenate((xyz, normal, self.case['curvature'][self.episode_ids].reshape(len(rotations), -1, 1),
+                                   distances[:, :, None]), axis=-1).astype(np.float32)
+        ids = candidate_indices(self.case, self.fps_options)
+        xyz = (np.einsum('nj,bij->bni', self.xyz[ids] - self.pivot, rotations)
+               + self.pivot + translations[:, None]).astype(np.float32)
+        normal = np.einsum('nj,bij->bni', self.normal[ids], rotations)
+        distances = sample_sdf(self.case, xyz.reshape(-1, 3)).reshape(len(rotations), -1)
+        selected = [sample_upper_mesh(self.case, x, n, self.points, self.fps_options,
+                                     return_indices=True, preselected_ids=ids, precomputed_sdf=d)
+                    for x, n, d in zip(xyz, normal, distances)]
+        features = [x[0] for x in selected]
+        self.last_ids = np.asarray([x[1] for x in selected])
+        if fixed:
+            self.episode_ids = self.last_ids
         return np.asarray(features, dtype=np.float32)
 
-    def reset(self, count):
+    def reset(self, count, pose_bands=None):
+        self.begin_episode()
         while True:
-            rv = self.rng.uniform(-self.max_rotation, self.max_rotation, (count, 3))
-            translations = self.rng.uniform(-self.max_translation, self.max_translation, (count, 3))
+            if pose_bands:
+                probabilities = np.asarray([band['probability'] for band in pose_bands], dtype=float)
+                choices = self.rng.choice(len(pose_bands), size=count, p=probabilities)
+                rotation_limits = np.asarray([pose_bands[i]['rotation_deg'] for i in choices])[:, None]
+                translation_limits = np.asarray([pose_bands[i]['translation_mm'] for i in choices])[:, None]
+                rv = self.rng.uniform(-1, 1, (count, 3)) * rotation_limits
+                translations = self.rng.uniform(-1, 1, (count, 3)) * translation_limits
+            else:
+                rv = self.rng.uniform(-self.max_rotation, self.max_rotation, (count, 3))
+                translations = self.rng.uniform(-self.max_translation, self.max_translation, (count, 3))
             rotations = Rotation.from_rotvec(np.deg2rad(rv)).as_matrix()
             try:
                 points = self.points_at(rotations, translations)
                 return rotations, translations, points
             except ValueError:
-                # The teacher must never see clipped SDF values.
+                # Retry only if a pose or feature is invalid.
                 continue
 
     def observation(self, points):
@@ -81,33 +111,89 @@ class PoseTask:
             points = self.points_at(next_rotations, next_translations)
             return next_rotations, next_translations, points, valid
 
+    def move_scored(self, rotations, translations, points, scores, action, teacher,
+                    score_gate=False):
+        next_rotations, next_translations, next_points, valid = self.move(
+            rotations, translations, action)
+        next_scores = teacher_score(teacher, next_points, self.device)
+        if score_gate:
+            accepted = valid & (next_scores > scores)
+            next_rotations = np.where(accepted[:, None, None], next_rotations, rotations)
+            next_translations = np.where(accepted[:, None], next_translations, translations)
+            next_points = np.where(accepted[:, None, None], next_points, points)
+            next_scores = np.where(accepted, next_scores, scores)
+        else:
+            accepted = valid
+        return next_rotations, next_translations, next_points, next_scores, valid, accepted
+
 
 class Agent(nn.Module):
-    def __init__(self, samples=32, policy_width=128, initial_log_std=-0.5, **model_options):
+    def __init__(self, samples=128, policy_width=128, initial_log_std=-0.5,
+                 time_context=False, **model_options):
         super().__init__()
-        # The teacher encoder performs SDF-weighted FPS, local attention,
-        # global pooling and multi-scale SDF-weighted pooling on the same 8 channels.
+        # The shared input sampler performs candidate FPS; the encoder applies
+        # local attention and multi-scale distance-weighted pooling.
         self.encoder = OcclusionTeacher(sample_count=samples, **model_options)
         for parameter in self.encoder.head.parameters():
             parameter.requires_grad_(False)
         width = model_options.get('width', 64)
-        self.body = nn.Sequential(nn.Linear(width * 5 + 4, policy_width), nn.Tanh())
+        self.time_context = time_context
+        self.body = nn.Sequential(nn.Linear(width * 5 + 4 + (2 if time_context else 0), policy_width), nn.Tanh())
         self.actor = nn.Linear(policy_width, 6)
         self.critic = nn.Linear(policy_width, 1)
         self.log_std = nn.Parameter(torch.full((6,), initial_log_std))
 
-    def forward(self, obs):
-        h = self.body(self.encoder.encode(obs))
+    def forward(self, obs, context=None):
+        encoded = self.encoder.encode(obs)
+        return self.forward_encoded(encoded, context)
+
+    def forward_encoded(self, encoded, context=None):
+        if self.time_context:
+            if context is None:
+                raise ValueError('Time-conditioned agent requires explicit step context')
+            encoded = torch.cat((encoded, context), -1)
+        h = self.body(encoded)
         return self.actor(h), self.critic(h).squeeze(-1)
 
-    def distribution(self, obs):
-        mean, value = self(obs)
+    def distribution(self, obs, context=None):
+        mean, value = self(obs, context)
         return Normal(mean, self.log_std.exp().expand_as(mean)), value
+
+    def distribution_encoded(self, encoded, context=None):
+        mean, value = self.forward_encoded(encoded, context)
+        return Normal(mean, self.log_std.exp().expand_as(mean)), value
+
+
+def step_context(agent, count, step, horizon, device):
+    if not agent.time_context:
+        return None
+    return torch.tensor([step / max(horizon, 1), (horizon - step) / max(horizon, 1)],
+                        dtype=torch.float32, device=device).expand(count, -1)
+
+
+def action_steps(options, step):
+    """Absolute step schedule; never stops or rejects an action."""
+    for stage in options.get('action_schedule', []):
+        if step < stage['until_step']:
+            return stage['rotation_deg'], stage['translation_mm']
+    stages = options.get('action_schedule', [])
+    if stages:
+        return stages[-1]['rotation_deg'], stages[-1]['translation_mm']
+    return options['action_rotation_step_deg'], options['action_translation_step_mm']
+
+
+def continuous_error(angle, distance, scales=(8., 4.)):
+    return .5 * (np.asarray(angle) / scales[0] + np.asarray(distance) / scales[1])
 
 
 def load_teacher(path, device, samples, **model_options):
     checkpoint = torch.load(path, map_location=device)
-    teacher = OcclusionTeacher(sample_count=min(samples, checkpoint['samples']),
+    if checkpoint.get('model_options') is not None and checkpoint['model_options'] != model_options:
+        raise ValueError('Teacher model/sampling configuration does not match checkpoint')
+    if checkpoint['samples'] != samples:
+        raise ValueError('Teacher checkpoint FPS count %d does not match requested %d; retrain the teacher or use its original configuration' %
+                         (checkpoint['samples'], samples))
+    teacher = OcclusionTeacher(sample_count=samples,
                                **model_options).to(device)
     teacher.load_state_dict(checkpoint['model'])
     teacher.eval()
@@ -116,42 +202,58 @@ def load_teacher(path, device, samples, **model_options):
     return teacher
 
 
+def validate_teacher_pair(checkpoint, teacher_path):
+    if checkpoint.get('teacher_sha256'):
+        import hashlib
+        if hashlib.sha256(Path(teacher_path).read_bytes()).hexdigest() != checkpoint['teacher_sha256']:
+            raise ValueError('Scoring teacher differs from the frozen teacher used to train this agent')
+
+
 @torch.no_grad()
 def teacher_score(teacher, points, device):
     return teacher(torch.from_numpy(points).to(device)).cpu().numpy()
 
 
 def evaluate(agent, task, teacher, episodes, horizon, seed,
-             success_rotation_deg=1.0, success_translation_mm=0.5):
+             success_rotation_deg=1.0, success_translation_mm=0.5,
+             score_gate=False):
     task.rng = np.random.RandomState(seed)
     rotations, translations, points = task.reset(episodes)
     initial_angle, initial_distance = task.error(rotations, translations)
-    initial_score = teacher_score(teacher, points, task.device)
+    score = teacher_score(teacher, points, task.device)
+    initial_score = score.copy()
     for _ in range(horizon):
         with torch.no_grad():
             action = torch.tanh(agent(task.observation(points))[0]).cpu().numpy()
-        rotations, translations, points, _ = task.move(rotations, translations, action)
+        rotations, translations, points, score, _, _ = task.move_scored(
+            rotations, translations, points, score, action, teacher, score_gate)
     angle, distance = task.error(rotations, translations)
-    score = teacher_score(teacher, points, task.device)
     return {'episodes': episodes, 'initial_rotation_deg': float(initial_angle.mean()),
             'final_rotation_deg': float(angle.mean()), 'initial_translation_mm': float(initial_distance.mean()),
             'final_translation_mm': float(distance.mean()), 'initial_teacher_logit': float(initial_score.mean()),
             'final_teacher_logit': float(score.mean()),
-            'success_rate': float(((angle < success_rotation_deg) &
-                                   (distance < success_translation_mm)).mean()),
+            'initial_success_rate': float(((initial_angle <= success_rotation_deg) &
+                                           (initial_distance <= success_translation_mm)).mean()),
+            'rotation_improved_fraction': float((angle < initial_angle).mean()),
+            'translation_improved_fraction': float((distance < initial_distance).mean()),
+            'success_rate': float(((angle <= success_rotation_deg) &
+                                   (distance <= success_translation_mm)).mean()),
             'success_rotation_deg': success_rotation_deg,
             'success_translation_mm': success_translation_mm}
 
 
 def evaluate_cases(agent, case_paths, make_task, teacher, episodes, horizon, seed,
-                   success_rotation_deg, success_translation_mm):
+                   success_rotation_deg, success_translation_mm, score_gate=False):
     results = [evaluate(agent, make_task(path, index), teacher, episodes, horizon,
-                        seed + index * 1009, success_rotation_deg, success_translation_mm)
+                        seed + index * 1009, success_rotation_deg, success_translation_mm,
+                        score_gate)
                for index, path in enumerate(case_paths)]
     averaged = {key: float(np.mean([result[key] for result in results]))
                 for key in ('initial_rotation_deg', 'final_rotation_deg',
                             'initial_translation_mm', 'final_translation_mm',
-                            'initial_teacher_logit', 'final_teacher_logit', 'success_rate')}
+                            'initial_teacher_logit', 'final_teacher_logit',
+                            'initial_success_rate', 'rotation_improved_fraction',
+                            'translation_improved_fraction', 'success_rate')}
     return {'episodes': episodes * len(case_paths), 'cases': len(case_paths), **averaged,
             'success_rotation_deg': success_rotation_deg,
             'success_translation_mm': success_translation_mm}
@@ -160,7 +262,7 @@ def evaluate_cases(agent, case_paths, make_task, teacher, episodes, horizon, see
 def train(args):
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = resolve_device(override=getattr(args,'device',None))
     model_options = json.loads(args.model_options)
     train_cases = json.loads(args.train_cases) if args.train_cases else [args.case]
     eval_paths = json.loads(args.eval_cases) if args.eval_cases else [args.case]
@@ -168,16 +270,22 @@ def train(args):
         raise ValueError('Train and evaluation case lists must be nonempty')
     if not args.eval_only and args.iterations < len(train_cases):
         raise ValueError('agent.iterations must be at least the number of training cases')
+    pose_bands = json.loads(args.training_pose_bands) if args.training_pose_bands else None
+    if pose_bands:
+        probabilities = np.asarray([band['probability'] for band in pose_bands], dtype=float)
+        if (probabilities < 0).any() or not np.isclose(probabilities.sum(), 1):
+            raise ValueError('Training pose-band probabilities must be nonnegative and sum to 1')
 
     def make_task(path, index):
         return PoseTask(path, args.points, args.seed, args.max_rotation, args.max_translation,
                         device, args.rotation_step_deg, args.translation_step_mm,
-                        args.point_seed + index * 1009)
+                        model_options)
 
     def evaluate_split(seed):
         return evaluate_cases(agent, eval_paths, make_task, teacher,
                               args.eval_episodes, args.horizon, seed,
-                              args.success_rotation_deg, args.success_translation_mm)
+                              args.success_rotation_deg, args.success_translation_mm,
+                              args.score_gated_actions)
     teacher = load_teacher(args.teacher, device, args.teacher_samples, **model_options)
     agent = Agent(args.teacher_samples, args.policy_width, args.initial_log_std,
                   **model_options).to(device)
@@ -204,7 +312,7 @@ def train(args):
     for iteration in range(args.iterations):
         task = make_task(train_cases[iteration % len(train_cases)], iteration % len(train_cases))
         task.rng = np.random.RandomState(args.seed + iteration * 1009)
-        rotations, translations, points = task.reset(args.envs)
+        rotations, translations, points = task.reset(args.envs, pose_bands)
         scores = teacher_score(teacher, points, device)
         rollout = []
         for step in range(args.horizon):
@@ -213,8 +321,9 @@ def train(args):
                 dist, value = agent.distribution(obs)
                 raw_action = dist.sample()
                 log_prob = dist.log_prob(raw_action).sum(-1)
-            next_rot, next_trans, next_points, _ = task.move(rotations, translations, torch.tanh(raw_action).cpu().numpy())
-            next_scores = teacher_score(teacher, next_points, device)
+            next_rot, next_trans, next_points, next_scores, _, _ = task.move_scored(
+                rotations, translations, points, scores, torch.tanh(raw_action).cpu().numpy(),
+                teacher, args.score_gated_actions)
             # The only reward signal is teacher-score change. A score decrease
             # gives negative reward; invalid SDF moves are rolled back (zero).
             reward = args.reward_scale * (next_scores - scores)
@@ -271,13 +380,14 @@ def main():
     parser.add_argument('--out', default=str(REPO_ROOT / 'runs/default/agent'))
     parser.add_argument('--checkpoint', default=None)
     parser.add_argument('--eval-only', action='store_true')
-    parser.add_argument('--points', type=int, default=256)
-    parser.add_argument('--teacher-samples', type=int, default=64)
+    parser.add_argument('--points', type=int, default=128)
+    parser.add_argument('--teacher-samples', type=int, default=128)
+    parser.add_argument('--score-gated-actions', action='store_true')
+    parser.add_argument('--training-pose-bands', default=None)
     parser.add_argument('--max-rotation', type=float, default=8.0)
     parser.add_argument('--max-translation', type=float, default=4.0)
     parser.add_argument('--rotation-step-deg', type=float, default=2.0)
     parser.add_argument('--translation-step-mm', type=float, default=0.4)
-    parser.add_argument('--point-seed', type=int, default=42)
     parser.add_argument('--model-options', default='{}')
     parser.add_argument('--policy-width', type=int, default=128)
     parser.add_argument('--initial-log-std', type=float, default=-0.5)
@@ -301,6 +411,7 @@ def main():
     parser.add_argument('--success-translation-mm', type=float, default=0.5)
     parser.add_argument('--log-every', type=int, default=10)
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--device', default=None)
     args = parser.parse_args()
     if args.iterations < 1 or args.envs < 1 or args.horizon < 1 or args.points < 1:
         parser.error('iterations, envs, horizon and points must be positive')

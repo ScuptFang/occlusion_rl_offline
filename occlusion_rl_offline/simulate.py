@@ -1,4 +1,4 @@
-"""Create a reproducible observed upper pose while keeping the lower SDF fixed."""
+"""Create a reproducible observed upper pose while keeping lower mesh fixed."""
 import json
 from pathlib import Path
 
@@ -20,12 +20,11 @@ def perturb_case(case_path, out_case, rotvec_deg, translation_mm, upper_stl=None
     pivot = case['xyz'].mean(0).astype(np.float64)
     xyz = ((case['xyz'] - pivot) @ rotation.T + pivot + translation).astype(np.float32)
     normal = (case['normal'] @ rotation.T).astype(np.float32)
-    # Check grid coverage before writing a case that the teacher cannot score.
-    sample_sdf(case['sdf_grid'], case['origin'], case['spacing'], xyz)
+    sample_sdf(case, xyz)
     out_case = Path(out_case)
     out_case.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out_case, xyz=xyz, normal=normal, curvature=case['curvature'],
-                        sdf_grid=case['sdf_grid'], origin=case['origin'], spacing=case['spacing'])
+                        lower_xyz=case['lower_xyz'], lower_normal=case['lower_normal'])
     matrix = np.eye(4)
     matrix[:3, :3] = rotation
     matrix[:3, 3] = pivot + translation - rotation @ pivot

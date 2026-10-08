@@ -1,0 +1,88 @@
+[
+  {
+    "label": "Original",
+    "episodes": 770,
+    "initial_error": 0.5210711488324379,
+    "macro": {
+      "10": {
+        "rotation_deg": 5.123288769085939,
+        "translation_mm": 2.269387722639044,
+        "rotation_p90_deg": 7.911844434659508,
+        "translation_p90_mm": 3.154936655726127,
+        "error": 0.6038790133977517,
+        "teacher_gain": 0.3472094852477312,
+        "rotation_reduction_deg": -0.9366832475186794,
+        "translation_reduction_mm": -0.1941212927631719,
+        "rotation_improved_fraction": 0.27734375,
+        "translation_improved_fraction": 0.2942708333333333,
+        "score_up_error_worse_fraction": 0.4778645833333333
+      }
+    }
+  },
+  {
+    "label": "Seed61001",
+    "episodes": 770,
+    "initial_error": 0.5210711488324379,
+    "macro": {
+      "10": {
+        "rotation_deg": 3.3516577006528085,
+        "translation_mm": 2.2755001866442797,
+        "rotation_median_deg": 3.393803002817353,
+        "translation_median_mm": 2.314185212639349,
+        "rotation_p90_deg": 5.0633233564135045,
+        "translation_p90_mm": 3.264705028448727,
+        "error": 0.49391612962133546,
+        "teacher_gain": 0.45198284834623337,
+        "rotation_reduction_deg": 0.8349478209144513,
+        "translation_reduction_mm": -0.20023375676840716,
+        "rotation_improved_fraction": 0.70703125,
+        "translation_improved_fraction": 0.3033854166666667,
+        "score_up_error_worse_fraction": 0.3059895833333333
+      }
+    }
+  },
+  {
+    "label": "Seed61002",
+    "episodes": 770,
+    "initial_error": 0.5210711488324379,
+    "macro": {
+      "10": {
+        "rotation_deg": 5.56319843767302,
+        "translation_mm": 2.136556841457203,
+        "rotation_median_deg": 5.527762912479617,
+        "translation_median_mm": 2.1610607631996115,
+        "rotation_p90_deg": 8.025936011859423,
+        "translation_p90_mm": 2.9126808969918017,
+        "error": 0.614769507536714,
+        "teacher_gain": 0.20349228382110596,
+        "rotation_reduction_deg": -1.3765929161057606,
+        "translation_reduction_mm": -0.061290411581330834,
+        "rotation_improved_fraction": 0.23958333333333334,
+        "translation_improved_fraction": 0.3958333333333333,
+        "score_up_error_worse_fraction": 0.51953125
+      }
+    }
+  },
+  {
+    "label": "Seed61003",
+    "episodes": 770,
+    "initial_error": 0.5210711488324379,
+    "macro": {
+      "10": {
+        "rotation_deg": 4.44448664829705,
+        "translation_mm": 2.2071690127044996,
+        "rotation_median_deg": 4.308549820630472,
+        "translation_median_mm": 2.226706757140461,
+        "rotation_p90_deg": 6.838567486217765,
+        "translation_p90_mm": 3.08261201920206,
+        "error": 0.5536765421066282,
+        "teacher_gain": 0.40695084010561305,
+        "rotation_reduction_deg": -0.2578811267297902,
+        "translation_reduction_mm": -0.13190258282862724,
+        "rotation_improved_fraction": 0.3919270833333333,
+        "translation_improved_fraction": 0.34765625,
+        "score_up_error_worse_fraction": 0.4856770833333333
+      }
+    }
+  }
+]

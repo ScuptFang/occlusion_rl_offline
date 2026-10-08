@@ -1,4 +1,5 @@
 """Calibrate the case teacher's logit to a continuous synthetic pose-quality score."""
+from .runtime import resolve_device
 import argparse
 import json
 import math
@@ -17,8 +18,10 @@ from .model import OcclusionTeacher
 
 class PoseScoreDataset(Dataset):
     def __init__(self, case, count, points, seed, bands=None,
-                 quality_rotation_scale_deg=8.0, quality_translation_scale_mm=4.0):
-        self.poses = PoseDataset(case if isinstance(case, (list, tuple)) else [case], points, 1, seed)
+                 quality_rotation_scale_deg=8.0, quality_translation_scale_mm=4.0,
+                 fps_options=None):
+        self.poses = PoseDataset(case if isinstance(case, (list, tuple)) else [case],
+                                 points, 1, seed, fps_options=fps_options)
         self.count, self.seed, self.epoch = count, seed, 0
         if count < len(self.poses.paths):
             raise ValueError('Pose count must cover every case at least once')
@@ -41,11 +44,9 @@ class PoseScoreDataset(Dataset):
 
     def __getitem__(self, index):
         item_seed = self.seed + self.epoch * 1000003 + index
-        points_rng = np.random.RandomState(item_seed)
         pose_rng = np.random.RandomState(item_seed + 1000000000)
         case = self.poses.case(min(index * len(self.poses.paths) // self.count,
                                    len(self.poses.paths) - 1))
-        ids = points_rng.choice(len(case['xyz']), self.poses.points, replace=len(case['xyz']) < self.poses.points)
         # Cover near, initial and reachable states, including poses an agent
         # might visit after moving away from the original orientation.
         band = self.bands[pose_rng.choice(len(self.bands), p=self.probabilities)]
@@ -55,7 +56,7 @@ class PoseScoreDataset(Dataset):
             angles = pose_rng.uniform(-max_rotation, max_rotation, 3).astype(np.float32)
             trans = pose_rng.uniform(-max_translation, max_translation, 3).astype(np.float32)
             try:
-                features = self.poses.pose(case, ids, trans, angles)
+                features = self.poses.pose(case, trans, angles)
                 angle = np.rad2deg(Rotation.from_euler('xyz', angles, degrees=True).magnitude())
                 quality = (-angle / self.quality_rotation_scale_deg
                            - np.linalg.norm(trans) / self.quality_translation_scale_mm)
@@ -89,7 +90,7 @@ def main():
     parser.add_argument('--train-count', type=int, default=768)
     parser.add_argument('--val-count', type=int, default=256)
     parser.add_argument('--points', type=int, default=128)
-    parser.add_argument('--samples', type=int, default=32)
+    parser.add_argument('--samples', type=int, default=128)
     parser.add_argument('--batch', type=int, default=16)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--weight-decay', type=float, default=1e-4)
@@ -100,16 +101,19 @@ def main():
     parser.add_argument('--quality-translation-scale-mm', type=float, default=4.0)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--model-options', default='{}', help='JSON keyword arguments for OcclusionTeacher')
+    parser.add_argument('--device', default=None)
     args = parser.parse_args()
     torch.manual_seed(args.seed)
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = resolve_device(override=getattr(args,'device',None))
     source = torch.load(args.source, map_location=device)
-    model = OcclusionTeacher(sample_count=args.samples, **json.loads(args.model_options)).to(device)
+    model_options = json.loads(args.model_options)
+    model = OcclusionTeacher(sample_count=args.samples, **model_options).to(device)
     model.load_state_dict(source['model'])
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     data_options = {'bands': json.loads(args.pose_bands) if args.pose_bands else None,
                     'quality_rotation_scale_deg': args.quality_rotation_scale_deg,
-                    'quality_translation_scale_mm': args.quality_translation_scale_mm}
+                    'quality_translation_scale_mm': args.quality_translation_scale_mm,
+                    'fps_options': model_options}
     train_cases = json.loads(args.train_cases) if args.train_cases else [args.case]
     val_cases = json.loads(args.val_cases) if args.val_cases else [args.case]
     train = PoseScoreDataset(train_cases, args.train_count, args.points, args.seed,
@@ -143,7 +147,7 @@ def main():
         print(json.dumps(result), flush=True)
         if metrics['mae'] < best:
             best = metrics['mae']
-            torch.save({'model': model.state_dict(), 'samples': args.samples,
+            torch.save({'model': model.state_dict(), 'samples': args.samples, 'model_options': model_options,
                         'epoch': epoch + 1, 'train_cases': train_cases,
                         'validation_cases': val_cases}, out / 'best.pt')
             (out / 'validation.json').write_text(json.dumps(metrics, indent=2))

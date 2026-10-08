@@ -1,0 +1,340 @@
+{
+  "version": 2,
+  "units": "mm",
+  "note": "Pairs 001-010 are STL re-exports from the previous public_cohort/raw_selected training run; pair 007 already has the same y_to_z rigid rotation on both jaws. Pair 011 is the original demo pair. Source SHA-256 values are retained as original_source_sha256 where re-export changed bytes. Clinical occlusion has not been independently verified.",
+  "pairs": [
+    {
+      "case_id": "github_zoliqua_01",
+      "source": "github_zoliqua_dental_cad_designer",
+      "source_url": "https://github.com/ZoliQua/Dental-CAD-Designer",
+      "training_transform": "identity",
+      "number": "001",
+      "role": "training_candidate",
+      "files": {
+        "upper": {
+          "bytes": 12506484,
+          "triangles": 250128,
+          "sha256": "c1275b408a6da22c7b975929da2a221d7bd355e2f8df28bac1dfcc11bd77ec4c",
+          "path": "001/upper.stl",
+          "original_path": "github_zoliqua_dental_cad_designer/arch-case-01/upper.stl",
+          "original_source_sha256": "e59bf34c9061a24d7b3ad6f3f746c3f98ab6edd4df3fc8b455392437bea853c9",
+          "serialization": "trimesh_export_from_source"
+        },
+        "lower": {
+          "bytes": 12110034,
+          "triangles": 242199,
+          "sha256": "bd1c52c981a613deaf5c3fd4cfffc1b867a7a05eff9fd641ef9650b067040283",
+          "path": "001/lower.stl",
+          "original_path": "github_zoliqua_dental_cad_designer/arch-case-01/lower.stl",
+          "original_source_sha256": "6e63a0e57761bd312a3048cbe3d60ea897579126a4f3204e8fd8d81190435233",
+          "serialization": "trimesh_export_from_source"
+        }
+      },
+      "coordinate_transform_applied": "none"
+    },
+    {
+      "case_id": "github_zoliqua_02",
+      "source": "github_zoliqua_dental_cad_designer",
+      "source_url": "https://github.com/ZoliQua/Dental-CAD-Designer",
+      "training_transform": "identity",
+      "number": "002",
+      "role": "training_candidate",
+      "files": {
+        "upper": {
+          "bytes": 16984084,
+          "triangles": 339680,
+          "sha256": "b482add2e3b88d889d95c05d37569e6652963ab2637821c6ea4f72f022e37326",
+          "path": "002/upper.stl",
+          "original_path": "github_zoliqua_dental_cad_designer/arch-case-02/upper.stl",
+          "original_source_sha256": "1173bc3287dbcfdd5100486345e492cde76508c21b4c25e1968aa61519b02a04",
+          "serialization": "trimesh_export_from_source"
+        },
+        "lower": {
+          "bytes": 13749134,
+          "triangles": 274981,
+          "sha256": "e97f4edbd1e069111780218e8a441a32d548649d8832b2d90ed10b7042d21e9a",
+          "path": "002/lower.stl",
+          "original_path": "github_zoliqua_dental_cad_designer/arch-case-02/lower.stl",
+          "original_source_sha256": "ac66c8ac5f408241e0d620deaed5db9f24929cfbfea147c2de6d64979748e1e8",
+          "serialization": "trimesh_export_from_source"
+        }
+      },
+      "coordinate_transform_applied": "none"
+    },
+    {
+      "case_id": "osf8a53z_I",
+      "source": "osf_8a53z",
+      "source_url": "https://osf.io/8a53z/",
+      "training_transform": "identity",
+      "number": "003",
+      "role": "training_candidate",
+      "files": {
+        "upper": {
+          "bytes": 11791584,
+          "triangles": 235830,
+          "sha256": "abc05e434a98b9b992a6f7f30dff96fb414c048fd4cefc6d6f311d50e3ca869f",
+          "path": "003/upper.stl",
+          "original_path": "osf_8a53z/case_I/upper.stl",
+          "source_file_url": "https://osf.io/download/68ab455b58a0b9eea27da940/",
+          "original_source_sha256": "7b4db6196dcf847d404ded140fe6ab1beb3bbbfcfad174435db2988def639d47",
+          "serialization": "trimesh_export_from_source"
+        },
+        "lower": {
+          "bytes": 9650234,
+          "triangles": 193003,
+          "sha256": "da03553010b15ef0953a595c6b392990f2bce17a56cfd9990305dc0c310289ec",
+          "path": "003/lower.stl",
+          "original_path": "osf_8a53z/case_I/lower.stl",
+          "source_file_url": "https://osf.io/download/68ab450fb189cfbe85bcf529/",
+          "original_source_sha256": "079346c4cf4b9d1b596e8b8e2862e09715984aec42ca94d490a96183807872ab",
+          "serialization": "trimesh_export_from_source"
+        }
+      },
+      "coordinate_transform_applied": "none"
+    },
+    {
+      "case_id": "osf8a53z_II",
+      "source": "osf_8a53z",
+      "source_url": "https://osf.io/8a53z/",
+      "training_transform": "identity",
+      "number": "004",
+      "role": "training_candidate",
+      "files": {
+        "upper": {
+          "bytes": 11805884,
+          "triangles": 236116,
+          "sha256": "a36e1dbc97747b7c18aeaa7177254beef4726c799d87e1da5bf981c2f2ff92bf",
+          "path": "004/upper.stl",
+          "original_path": "osf_8a53z/case_II/upper.stl",
+          "source_file_url": "https://osf.io/download/68ab50c6dafdf90a2e7daab6/",
+          "original_source_sha256": "cbb20783fe8ed7714037b1d68f78f62423443a72a0916d72a835b08e6be4ef22",
+          "serialization": "trimesh_export_from_source"
+        },
+        "lower": {
+          "bytes": 8475734,
+          "triangles": 169513,
+          "sha256": "d89be6593faef6d8b46248213425d47e0ccbe5213d5d483dca34746ab6f4ebba",
+          "path": "004/lower.stl",
+          "original_path": "osf_8a53z/case_II/lower.stl",
+          "source_file_url": "https://osf.io/download/68ab4932551ac2d1cebcf411/",
+          "original_source_sha256": "18d587320577056c069e919b81f4ef76f7b1406c2411747570877c2214cfa646",
+          "serialization": "trimesh_export_from_source"
+        }
+      },
+      "coordinate_transform_applied": "none"
+    },
+    {
+      "case_id": "osf8a53z_III",
+      "source": "osf_8a53z",
+      "source_url": "https://osf.io/8a53z/",
+      "training_transform": "identity",
+      "number": "005",
+      "role": "training_candidate",
+      "files": {
+        "upper": {
+          "bytes": 15545634,
+          "triangles": 310911,
+          "sha256": "f466801b021926b9a93440095f6f381f4bcbb6c722271c3b9f79dfdca650be11",
+          "path": "005/upper.stl",
+          "original_path": "osf_8a53z/case_III/upper.stl",
+          "source_file_url": "https://osf.io/download/68ab56157b011a80ef161fb3/",
+          "original_source_sha256": "5049d67d4f28de3045a99a0a1f4a67a38472df59a54c825912142cf39ed77629",
+          "serialization": "trimesh_export_from_source"
+        },
+        "lower": {
+          "bytes": 10206284,
+          "triangles": 204124,
+          "sha256": "ae3bcb5c6109cb4b750b65770ea9af46a593737c42168fc9cb6fe57c3ac91ae7",
+          "path": "005/lower.stl",
+          "original_path": "osf_8a53z/case_III/lower.stl",
+          "source_file_url": "https://osf.io/download/68ab55df52e1d68c25affc38/",
+          "original_source_sha256": "b5df0b499345505494e733a8a1ed8153922243147d12e75ff0d84318dc257fe4",
+          "serialization": "trimesh_export_from_source"
+        }
+      },
+      "coordinate_transform_applied": "none"
+    },
+    {
+      "case_id": "osf8a53z_IV",
+      "source": "osf_8a53z",
+      "source_url": "https://osf.io/8a53z/",
+      "training_transform": "identity",
+      "number": "006",
+      "role": "training_candidate",
+      "files": {
+        "upper": {
+          "bytes": 12799284,
+          "triangles": 255984,
+          "sha256": "d20602a221a2705f7f713d25ee90023074ebda8c731eafc62866e70cce7ae907",
+          "path": "006/upper.stl",
+          "original_path": "osf_8a53z/case_IV/upper.stl",
+          "source_file_url": "https://osf.io/download/68ab5a2c9a7c63e440bcf421/",
+          "original_source_sha256": "302326938a310be2b12450f387f192dd56281ca7330e9e6d11a3e8a71a4ea014",
+          "serialization": "trimesh_export_from_source"
+        },
+        "lower": {
+          "bytes": 10742284,
+          "triangles": 214844,
+          "sha256": "95606f868126eea8b41aca7b1d36cf983f3bfbee6dac6b52d93783016eeb28c2",
+          "path": "006/lower.stl",
+          "original_path": "osf_8a53z/case_IV/lower.stl",
+          "source_file_url": "https://osf.io/download/68ab59f47b011a80ef162006/",
+          "original_source_sha256": "a22d18992546de130c6361648e482c10a278f6c1ec0f49fabfd1a65667679462",
+          "serialization": "trimesh_export_from_source"
+        }
+      },
+      "coordinate_transform_applied": "none"
+    },
+    {
+      "case_id": "zenodo8027553_00",
+      "source": "zenodo_8027553",
+      "source_url": "https://zenodo.org/records/8027553",
+      "training_transform": "identity",
+      "number": "007",
+      "role": "training_candidate",
+      "files": {
+        "upper": {
+          "bytes": 13591784,
+          "triangles": 271834,
+          "sha256": "ca5c1a61a52fd64df8b5fc21f4f133135f72ca14c3da80f2efe28b5c2b8bd374",
+          "path": "007/upper.stl",
+          "original_path": "zenodo_8027553/case_00/upper.stl",
+          "source_member": "FusedData/00/IOS/U.stl",
+          "original_source_sha256": "14e9b88a8ff342247dd383dc4220e6a04c09dcc74f2c2b30327d36227d8d58d2",
+          "serialization": "trimesh_export_from_source"
+        },
+        "lower": {
+          "bytes": 11341934,
+          "triangles": 226837,
+          "sha256": "0d08b3777a8e5eb85071f7ce6c6a3f7801dedd240d57bcfdcd29569a15836d76",
+          "path": "007/lower.stl",
+          "original_path": "zenodo_8027553/case_00/lower.stl",
+          "source_member": "FusedData/00/IOS/L.stl",
+          "original_source_sha256": "d5581086f744ac55a8855b1800704a193b873938fed3aa3b214b492b0435b884",
+          "serialization": "trimesh_export_from_source"
+        }
+      },
+      "coordinate_transform_applied": "y_to_z_to_both_jaws"
+    },
+    {
+      "case_id": "zenodo8027553_01",
+      "source": "zenodo_8027553",
+      "source_url": "https://zenodo.org/records/8027553",
+      "training_transform": "identity",
+      "number": "008",
+      "role": "training_candidate",
+      "files": {
+        "upper": {
+          "bytes": 15354234,
+          "triangles": 307083,
+          "sha256": "63c2c47d033e4b686813cf2beadc58cdbcdc876fbb2781e35a0c10da345f6da5",
+          "path": "008/upper.stl",
+          "original_path": "zenodo_8027553/case_01/upper.stl",
+          "source_member": "FusedData/01/IOS/U.stl",
+          "original_source_sha256": "013696c9368d27205177589384405451f581f9e6326d0558376a9b183693991b",
+          "serialization": "trimesh_export_from_source"
+        },
+        "lower": {
+          "bytes": 13182684,
+          "triangles": 263652,
+          "sha256": "3240e7065372320be2ec91d311ca9e16cedd171589e6287c68b7f362c7e38472",
+          "path": "008/lower.stl",
+          "original_path": "zenodo_8027553/case_01/lower.stl",
+          "source_member": "FusedData/01/IOS/L.stl",
+          "original_source_sha256": "6a1e280099411a79ff33dd837e7788b73297a1d1510d2912a01c785f134fca3e",
+          "serialization": "trimesh_export_from_source"
+        }
+      },
+      "coordinate_transform_applied": "none"
+    },
+    {
+      "case_id": "zenodo8027553_02",
+      "source": "zenodo_8027553",
+      "source_url": "https://zenodo.org/records/8027553",
+      "training_transform": "identity",
+      "number": "009",
+      "role": "training_candidate",
+      "files": {
+        "upper": {
+          "bytes": 16498034,
+          "triangles": 329959,
+          "sha256": "d9b6230df48672d6a8a757e193e3257bb1ddbe83bdc2aa25c1c613860374e894",
+          "path": "009/upper.stl",
+          "original_path": "zenodo_8027553/case_02/upper.stl",
+          "source_member": "FusedData/02/IOS/U.stl",
+          "original_source_sha256": "798be13d42219d9ff46143d86e3789a40c254d03cc2cf93441102074858d07a6",
+          "serialization": "trimesh_export_from_source"
+        },
+        "lower": {
+          "bytes": 14494084,
+          "triangles": 289880,
+          "sha256": "8a36d61efd20bd005c0d2f5002af09232cb51fe27a9d3013fc0e2b3a12777b4b",
+          "path": "009/lower.stl",
+          "original_path": "zenodo_8027553/case_02/lower.stl",
+          "source_member": "FusedData/02/IOS/L.stl",
+          "original_source_sha256": "5b2fe871f1b7fe2e2d116d87dbf33d828ee97692ea0a66d9f6a57ed9c564ab1e",
+          "serialization": "trimesh_export_from_source"
+        }
+      },
+      "coordinate_transform_applied": "none"
+    },
+    {
+      "case_id": "zenodo8027553_03",
+      "source": "zenodo_8027553",
+      "source_url": "https://zenodo.org/records/8027553",
+      "training_transform": "identity",
+      "number": "010",
+      "role": "training_candidate",
+      "files": {
+        "upper": {
+          "bytes": 13765434,
+          "triangles": 275307,
+          "sha256": "eaf0001d1e647249080b9254db38a70185397c673e6337ba9b0374e70058fa11",
+          "path": "010/upper.stl",
+          "original_path": "zenodo_8027553/case_03/upper.stl",
+          "source_member": "FusedData/03/IOS/U.stl",
+          "original_source_sha256": "a6f5e30aab49439d81a5eff86f1af4d49650de85526e100ba101345a283cf206",
+          "serialization": "trimesh_export_from_source"
+        },
+        "lower": {
+          "bytes": 11074834,
+          "triangles": 221495,
+          "sha256": "106bd50f64b5d14049295708110a1ef2fc4f7a1acb2b55eed01a4a20500521b5",
+          "path": "010/lower.stl",
+          "original_path": "zenodo_8027553/case_03/lower.stl",
+          "source_member": "FusedData/03/IOS/L.stl",
+          "original_source_sha256": "9b6e9839b703869daaaad6f5662cf1f03cf73965fa1782939a448cc9da6b9e2a",
+          "serialization": "trimesh_export_from_source"
+        }
+      },
+      "coordinate_transform_applied": "none"
+    },
+    {
+      "number": "011",
+      "case_id": "demo_01",
+      "source": "legacy_demo",
+      "source_url": null,
+      "training_transform": "identity",
+      "role": "demo",
+      "files": {
+        "upper": {
+          "path": "011/upper.stl",
+          "original_path": "upper.stl",
+          "bytes": 16515534,
+          "triangles": 330309,
+          "sha256": "76daf4068ec39fa2685607adc4ef50b254d275fb28d7a311af0f1dc9705e7166",
+          "serialization": "original_bytes"
+        },
+        "lower": {
+          "path": "011/lower.stl",
+          "original_path": "lower.stl",
+          "bytes": 14340134,
+          "triangles": 286801,
+          "sha256": "5e4b629904c481bf914393b4935f324599d74031c78c92f2ad2e36e637243a72",
+          "serialization": "original_bytes"
+        }
+      },
+      "coordinate_transform_applied": "none"
+    }
+  ]
+}

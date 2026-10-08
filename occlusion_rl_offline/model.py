@@ -57,10 +57,12 @@ class LocalAttention(nn.Module):
 
 class OcclusionTeacher(nn.Module):
     """Input [B,N,8]: xyz(mm), normal, mean curvature, lower SDF(mm)."""
-    def __init__(self, sample_count=256, width=64, k=16, fps_strength=1.5,
+    def __init__(self, sample_count=128, width=64, k=16, encoder_layers=3, fps_strength=1.5,
                  contact_scales=(0.15, 0.6, 1.5), weight_floor=0.15,
                  contact_threshold=0.15, penetration_threshold=-0.1,
-                 stat_clip_mm=3.0):
+                 stat_clip_mm=3.0, candidate_points=None, point_seed=42,
+                 contact_fps_fraction=0.0, contact_fps_max_mm=0.6,
+                 contact_fps_pool_factor=4, sampling_mode='dynamic'):
         super().__init__()
         self.sample_count = sample_count
         self.fps_strength = fps_strength
@@ -69,15 +71,18 @@ class OcclusionTeacher(nn.Module):
         self.contact_threshold = contact_threshold
         self.penetration_threshold = penetration_threshold
         self.stat_clip_mm = stat_clip_mm
+        if encoder_layers < 1:
+            raise ValueError('encoder_layers must be positive')
         self.embed = nn.Sequential(nn.Linear(8, width), nn.LayerNorm(width), nn.ReLU(), nn.Linear(width, width))
-        self.blocks = nn.ModuleList([LocalAttention(width, k), LocalAttention(width, k)])
+        self.blocks = nn.ModuleList([LocalAttention(width, k) for _ in range(encoder_layers)])
         self.head = nn.Sequential(nn.Linear(width * 5 + 4, width), nn.ReLU(), nn.Linear(width, 1))
 
-    def encode(self, points):
+    def encode(self, points, pooling_override=None):
         xyz, d = points[:, :, :3], points[:, :, 7]
-        idx = weighted_fps(xyz, d, self.sample_count, self.fps_strength,
-                           self.contact_scales, self.weight_floor)
-        x, xyz, d = gather(points, idx), gather(xyz, idx), gather(d.unsqueeze(-1), idx).squeeze(-1)
+        if points.shape[1] != self.sample_count:
+            raise ValueError('Expected %d candidate-FPS points, got %d' %
+                             (self.sample_count, points.shape[1]))
+        x = points
         # Center xyz to remove arbitrary scan-origin shortcut; keep distances in mm.
         x = torch.cat((xyz - xyz.mean(1, keepdim=True), x[:, :, 3:]), -1)
         f = self.embed(x)
@@ -85,6 +90,12 @@ class OcclusionTeacher(nn.Module):
             f = block(xyz, f)
         pooled = [f.mean(1), f.max(1).values]
         for w in sdf_weights(d, self.contact_scales, self.weight_floor):
+            if pooling_override == 'uniform':
+                w = torch.ones_like(w)
+            elif pooling_override == 'reversed':
+                w = w.flip(1)
+            elif pooling_override is not None:
+                raise ValueError('Unknown pooling override: %s' % pooling_override)
             pooled.append((f * w.unsqueeze(-1)).sum(1) / w.sum(1, keepdim=True).clamp_min(1e-6))
         stats = torch.stack(((d < self.penetration_threshold).float().mean(1),
                              (d.abs() < self.contact_threshold).float().mean(1),
@@ -92,5 +103,5 @@ class OcclusionTeacher(nn.Module):
                              d.abs().clamp_max(self.stat_clip_mm).mean(1)), -1)
         return torch.cat(pooled + [stats], -1)
 
-    def forward(self, points):
-        return self.head(self.encode(points)).squeeze(-1)
+    def forward(self, points, pooling_override=None):
+        return self.head(self.encode(points, pooling_override)).squeeze(-1)

@@ -1,4 +1,5 @@
 """Teacher scoring and deterministic agent rollout on an observed upper pose."""
+from .runtime import resolve_device
 import json
 from pathlib import Path
 
@@ -6,25 +7,25 @@ import numpy as np
 import torch
 import trimesh
 
-from .rl import Agent, PoseTask, load_teacher, teacher_score
+from .rl import Agent, PoseTask, load_teacher, teacher_score, action_steps, step_context, validate_teacher_pair
 
 
 def _task(case_path, cfg, device):
     agent = cfg['agent']
-    return PoseTask(case_path, agent['candidate_points'], agent['seed'],
+    return PoseTask(case_path, agent['fps_points'], agent['seed'],
                     agent['start_rotation_deg'], agent['start_translation_mm'],
                     device, agent['action_rotation_step_deg'],
-                    agent['action_translation_step_mm'], agent['point_seed'])
+                    agent['action_translation_step_mm'], cfg['model'])
 
 
 def score_case(case_path, teacher_path, cfg):
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = resolve_device(cfg)
     task = _task(case_path, cfg, device)
     teacher = load_teacher(teacher_path, device, cfg['teacher']['fps_points'],
                            **cfg['model'])
     points = task.points_at(np.eye(3)[None], np.zeros((1, 3)))
     return {'teacher_logit': float(teacher_score(teacher, points, device)[0]),
-            'candidate_points': len(task.xyz),
+            'upper_mesh_vertices': len(task.xyz),
             'weighted_fps_points': teacher.sample_count}
 
 
@@ -36,13 +37,17 @@ def _matrix(rotation, translation, pivot):
 
 
 def infer_agent(case_path, teacher_path, agent_path, out_dir, cfg, upper_stl=None, steps=None):
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = resolve_device(cfg)
     task = _task(case_path, cfg, device)
     teacher = load_teacher(teacher_path, device, cfg['teacher']['fps_points'],
                            **cfg['model'])
     policy = Agent(cfg['agent']['fps_points'], cfg['agent']['policy_width'],
-                   cfg['agent']['initial_log_std'], **cfg['model']).to(device)
+                   cfg['agent']['initial_log_std'],
+                   time_context=cfg['agent'].get('time_context', False), **cfg['model']).to(device)
     checkpoint = torch.load(agent_path, map_location=device)
+    validate_teacher_pair(checkpoint, teacher_path)
+    if checkpoint.get('model_options') is not None and checkpoint['model_options'] != cfg['model']:
+        raise ValueError('Agent model/sampling configuration does not match checkpoint')
     policy.load_state_dict(checkpoint['model'])
     policy.eval()
     rotation = np.eye(3)[None]
@@ -53,12 +58,16 @@ def infer_agent(case_path, teacher_path, agent_path, out_dir, cfg, upper_stl=Non
                 'matrix': _matrix(rotation[0], translation[0], task.pivot).tolist()}]
     horizon = cfg['inference']['steps'] if steps is None else steps
     for step in range(horizon):
+        task.rotation_step_deg, task.translation_step_mm = action_steps(cfg['agent'], step)
         with torch.no_grad():
-            action = torch.tanh(policy(task.observation(points))[0]).cpu().numpy()
-        rotation, translation, points, valid = task.move(rotation, translation, action)
-        score = teacher_score(teacher, points, device)
+            context = step_context(policy, len(points), step, horizon, device)
+            action = torch.tanh(policy(task.observation(points), context)[0]).cpu().numpy()
+        rotation, translation, points, score, valid, accepted = task.move_scored(
+            rotation, translation, points, score, action, teacher,
+            cfg['agent'].get('score_gated_actions', False))
         history.append({'step': step + 1, 'teacher_logit': float(score[0]),
                         'action': action[0].tolist(), 'valid_sdf': bool(valid[0]),
+                        'accepted_action': bool(accepted[0]),
                         'matrix': _matrix(rotation[0], translation[0], task.pivot).tolist()})
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)

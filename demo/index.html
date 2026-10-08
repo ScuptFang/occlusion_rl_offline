@@ -53,8 +53,8 @@
 <body>
   <main class="shell">
     <header>
-      <div><h1>上颌姿态恢复</h1><p class="sub">Agent 从随机旋转和平移的上颌出发，逐步调整到原始咬合姿态。</p></div>
-      <div class="badge">固定下颌 · 6 自由度 · 16 步回放</div>
+      <div><h1 id="demo-title">上颌姿态调整</h1><p class="sub" id="demo-subtitle"></p></div>
+      <div class="badge" id="demo-badge"></div>
     </header>
     <div class="layout">
       <section class="card">
@@ -93,7 +93,7 @@
         <div class="status" id="status"></div>
         <div class="chart-wrap"><div class="eyebrow">误差变化</div><canvas id="chart"></canvas><div class="chart-key"><span class="key"><i class="dot upper"></i> 旋转 °</span><span class="key"><i class="dot lower"></i> 平移 mm</span></div></div>
         <div><div class="eyebrow">本步调整量</div><div class="action" id="action"></div></div>
-        <p class="hint">灰白候选点来自上颌咬合面；彩色大点是当前步真正送入教师与 agent 编码器的 SDF 加权 FPS 点。其余上颌表面点仅用于展示。教师分数是唯一奖励来源，但不等于临床咬合质量。</p>
+        <p class="hint" id="sample-explanation"></p>
       </aside>
     </div>
   </main>
@@ -103,6 +103,11 @@
     const data = window.DEMO_DATA;
     if (!data) { document.body.textContent = '缺少 data.js。请先运行 generate.py。'; return; }
     const $ = id => document.getElementById(id);
+    $('demo-title').textContent = `${data.case_id} 病例 · 上颌姿态调整`;
+    $('demo-subtitle').textContent = data.score_gated_actions
+      ? '教师分数未上升时拒绝动作，保留上一步姿态。'
+      : 'PPO 动作全部执行；教师分数下降时仍继续调整。';
+    $('demo-badge').textContent = `固定下颌 · 6 自由度 · ${data.trajectories[0].steps.length - 1} 步回放`;
     const scene = $('scene'), chart = $('chart');
     const picker = $('case'), slider = $('step'), playButton = $('play');
     data.trajectories.forEach((item, i) => {
@@ -110,9 +115,17 @@
     });
     let caseIndex = 0, stepIndex = 0, playing = false, timer = null;
     let yaw = -.28, pitch = .68, zoom = 1;
-    const center = [0, -23, -1];
     const pivot = data.pivot;
     const upper = data.upper, lower = data.lower, candidateUpper = data.candidate_upper;
+    const scenePoints = upper.concat(lower);
+    const mins = [0,1,2].map(i => Math.min(...scenePoints.map(p => p[i])));
+    const maxs = [0,1,2].map(i => Math.max(...scenePoints.map(p => p[i])));
+    const center = mins.map((v,i) => (v + maxs[i]) / 2);
+    const span = maxs.map((v,i) => v - mins[i]);
+    if (!candidateUpper.length) $('candidates').closest('label').hidden = true;
+    $('sample-explanation').textContent = candidateUpper.length
+      ? '灰白点是旧版候选点；彩色大点是当前步实际输入网络的加权 FPS 点。教师分数是唯一奖励来源。'
+      : '彩色大点由上颌全部原网格顶点按下颌距离加权 FPS 直接选出，保留每个顶点的网格曲率；其余表面点仅用于展示。教师分数是唯一奖励来源。';
     const traj = () => data.trajectories[caseIndex].steps;
     function sizeCanvas(canvas) {
       const dpr = window.devicePixelRatio || 1;
@@ -131,7 +144,7 @@
     function drawScene() {
       const {w, h, dpr} = sizeCanvas(scene);
       const ctx = scene.getContext('2d'); ctx.clearRect(0, 0, w, h);
-      const scale = Math.min(w / 78, h / 74) * zoom;
+      const scale = Math.min(w / (span[0] * 1.3), h / (Math.hypot(span[1], span[2]) * 1.5)) * zoom;
       const pose = traj()[stepIndex], r = pose.rotation, t = pose.translation;
       const dots = [];
       function add(points, kind, transformed) {
@@ -154,7 +167,8 @@
       if ($('samples').checked) pose.selected_indices.forEach((id, i) => {
         const d = pose.selected_sdf[i];
         const kind = d < -.15 ? 4 : Math.abs(d) < .15 ? 5 : Math.abs(d) < .6 ? 6 : 7;
-        add([candidateUpper[id]], kind, true);
+        if (pose.selected_points) add([pose.selected_points[i]], kind, false);
+        else add([candidateUpper[id]], kind, true);
       });
       dots.sort((a, b) => (a[3] >= 4) - (b[3] >= 4) || a[2] - b[2]);
       const colors = ['#f7b99c', '#60798d', '#6be1ee', '#e8f3ff', '#df648c', '#52d6a6', '#50a9ea', '#ffc45d'];
@@ -199,15 +213,19 @@
       $('progress').textContent = `${stepIndex} / ${traj().length - 1}`;
       const close = s.selected_sdf.filter(d => Math.abs(d) < .6).length;
       const penetrating = s.selected_sdf.filter(d => d < 0).length;
-      $('sample-stats').textContent = `当前网络输入：${s.selected_indices.length} / ${candidateUpper.length} 点；${close} 点距下颌表面 < 0.6 mm，${penetrating} 点的 SDF 为负。`;
+      $('sample-stats').textContent = `当前网络输入：${s.selected_indices.length} / ${data.upper_mesh_vertices || candidateUpper.length} 个原网格顶点；${close} 点距下颌表面 < 0.6 mm，${penetrating} 点的带符号距离为负。`;
       $('rotation-delta').textContent = `起点 ${initial.rotation_error.toFixed(2)}°`;
       $('translation-delta').textContent = `起点 ${initial.translation_error.toFixed(2)} mm`;
-      const success = s.rotation_error < data.success_threshold.rotation_deg && s.translation_error < data.success_threshold.translation_mm;
+      const threshold = data.success_threshold;
+      const success = s.rotation_error <= threshold.rotation_deg && s.translation_error <= threshold.translation_mm;
       $('status').className = 'status' + (success ? ' success' : '');
-      $('status').textContent = success ? '达到 1° / 0.5 mm 恢复阈值' : `距恢复阈值：旋转 < 1°、平移 < 0.5 mm`;
+      const gateText = !stepIndex ? '初始随机扰动。' : data.score_gated_actions
+        ? (s.accepted_action ? '本步动作已接受；教师分数上升。' : '本步动作被拒绝；教师分数未上升，姿态保持不变。')
+        : '本步动作已执行；教师分数可升可降。';
+      $('status').textContent = `${gateText} ${success ? '达到' : '未达到'} ${threshold.rotation_deg}° / ${threshold.translation_mm} mm 恢复阈值。`;
       if (s.action) {
         const a = s.action;
-        $('action').textContent = `旋转向量 [${a.slice(0,3).map(v => (v*2).toFixed(2)).join(', ')}]° · 平移 [${a.slice(3).map(v => (v*.4).toFixed(2)).join(', ')}] mm`;
+        $('action').textContent = `${s.accepted_action ? '已接受' : '已拒绝'} · 提议旋转向量 [${a.slice(0,3).map(v => (v*data.action_rotation_step_deg).toFixed(2)).join(', ')}]° · 提议平移 [${a.slice(3).map(v => (v*data.action_translation_step_mm).toFixed(2)).join(', ')}] mm`;
       } else $('action').textContent = '尚未执行动作';
       drawScene(); drawChart();
     }

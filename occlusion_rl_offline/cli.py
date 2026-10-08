@@ -1,5 +1,7 @@
 """Single offline CLI for data, teacher and agent workflows."""
 import argparse
+import os
+from .runtime import resolve_device
 import json
 import subprocess
 import sys
@@ -31,7 +33,8 @@ def _run(module, args):
 def _teacher_checkpoint(config, override):
     if override:
         return resolve(override)
-    trained = resolve(config['paths']['run_dir']) / 'teacher/calibration/best.pt'
+    stage = 'joint' if config['teacher'].get('trainer') == 'joint' else 'calibration'
+    trained = resolve(config['paths']['run_dir']) / ('teacher/%s/best.pt' % stage)
     return trained if trained.exists() else resolve(config['paths']['packaged_teacher'])
 
 
@@ -46,8 +49,8 @@ def _agent_args(config, case, teacher, out, eval_only=False, checkpoint=None,
                 train_cases=None, eval_cases=None):
     a = config['agent']
     command = ['--case', case, '--teacher', teacher, '--out', out,
-               '--points', a['candidate_points'], '--teacher-samples', a['fps_points'],
-               '--point-seed', a['point_seed'], '--seed', a['seed'],
+               '--points', a['fps_points'], '--teacher-samples', a['fps_points'],
+               '--seed', a['seed'],
                '--model-options', json.dumps(config['model']),
                '--policy-width', a['policy_width'],
                '--initial-log-std', a['initial_log_std'],
@@ -73,6 +76,10 @@ def _agent_args(config, case, teacher, out, eval_only=False, checkpoint=None,
         command += ['--eval-episodes', a['validation_episodes']]
         if checkpoint:
             command += ['--checkpoint', checkpoint]
+    if a.get('score_gated_actions', False):
+        command += ['--score-gated-actions']
+    if a.get('training_pose_bands'):
+        command += ['--training-pose-bands', json.dumps(a['training_pose_bands'])]
     if train_cases is not None:
         command += ['--train-cases', json.dumps([str(x) for x in train_cases])]
     if eval_cases is not None:
@@ -84,6 +91,7 @@ def main():
     parser = argparse.ArgumentParser(prog='occlusion-rl', description=__doc__)
     parser.add_argument('--config', default='configs/default.json',
                         help='JSON config path relative to repository root')
+    parser.add_argument('--device', default=None, help='auto, cpu, cuda or cuda:N (before subcommand)')
     subs = parser.add_subparsers(dest='command', required=True)
     prepare = subs.add_parser('prepare', help='Build case.npz from aligned upper/lower STLs')
     prepare.add_argument('--upper', default=None)
@@ -96,7 +104,7 @@ def main():
     index = subs.add_parser('index-cases', help='Manifest from existing case_id/case.npz folders')
     index.add_argument('--input-dir', required=True)
     index.add_argument('--out', default=None)
-    inspect = subs.add_parser('inspect-data', help='Validate a prepared case and print SDF statistics')
+    inspect = subs.add_parser('inspect-data', help='Validate a prepared case and print nearest-point distance statistics')
     inspect.add_argument('--case', default=None)
     perturb = subs.add_parser('perturb', help='Make a posed upper case for offline inference testing')
     perturb.add_argument('--case', default=None)
@@ -133,6 +141,9 @@ def main():
     infer.add_argument('--steps', type=int, default=None)
     args = parser.parse_args()
     config = load_config(args.config)
+    device = resolve_device(config,args.device)
+    config.setdefault('runtime',{})['device']=device
+    os.environ['OCCLUSION_DEVICE']=device
     case = _path(getattr(args, 'case', None), config['paths']['case'])
     run_dir = resolve(config['paths']['run_dir'])
     if getattr(args, 'manifest', None) and getattr(args, 'case', None):
@@ -161,11 +172,10 @@ def main():
         print(json.dumps({'manifest': str(manifest), 'counts': counts}, indent=2))
     elif args.command == 'inspect-data':
         data = load_case(case)
-        probe = sample_sdf(data['sdf_grid'], data['origin'], data['spacing'],
-                           data['xyz'][:min(4096, len(data['xyz']))])
+        probe = sample_sdf(data, data['xyz'][:min(4096, len(data['xyz']))])
         print(json.dumps({'case': str(case), 'upper_points': len(data['xyz']),
-                          'grid_shape': list(data['sdf_grid'].shape),
-                          'spacing_mm': data['spacing'].tolist(),
+                          'lower_points': len(data['lower_xyz']),
+                          'distance_method': 'nearest lower mesh vertex; vertex-normal sign',
                           'probe_negative_fraction': float((probe < 0).mean()),
                           'probe_within_0_6mm': float((np.abs(probe) < .6).mean())}, indent=2))
     elif args.command == 'perturb':
@@ -178,6 +188,14 @@ def main():
         t = config['teacher']
         out = _path(args.out, run_dir / 'teacher')
         _snapshot(out, config)
+        if t.get('trainer') == 'joint':
+            if not args.manifest:
+                parser.error('Joint teacher training requires --manifest')
+            source = _path(args.source, config['paths'].get('optimization_source_teacher',config['paths']['packaged_teacher']))
+            _run('occlusion_rl_offline.joint_teacher',
+                 ['--config', args.config, '--manifest', args.manifest, '--source', source,
+                  '--out', out / 'joint', '--mode', t.get('joint_mode','consistent')])
+            return
         rank = out / 'ranking'
         calibrated = out / 'calibration'
         source = _path(args.source, config['paths']['initial_teacher'])
@@ -189,23 +207,24 @@ def main():
              ['--case', case, '--source', source, '--out', rank,
               '--epochs', t['ranking_epochs'], '--repeats', t['ranking_pairs_per_epoch'],
               '--validation-repeats', t.get('ranking_validation_pairs_per_case', 128),
-              '--points', t['candidate_points'], '--samples', t['fps_points'],
+              '--points', t['fps_points'], '--samples', t['fps_points'],
               '--batch', t['ranking_batch'], '--lr', t['ranking_lr'], '--seed', t['seed'],
               '--weight-decay', t['ranking_weight_decay'],
               '--near-translation-mm', t['ranking_near_translation_mm'],
               '--near-rotation-deg', t['ranking_near_rotation_deg'],
               '--far-magnitude-min', t['ranking_far_magnitude_min'],
               '--far-magnitude-max', t['ranking_far_magnitude_max'],
+              '--ranking-pose-bands', json.dumps(t.get('ranking_pose_bands')),
               '--margin', t['ranking_margin'],
               '--anchor-weight', t['ranking_anchor_weight'],
               '--model-options', model_options] + split_args +
-             (['--from-scratch'] if cohort and args.source is None else []))
+             (['--from-scratch'] if args.source is None else []))
         _run('occlusion_rl_offline.calibrate_teacher',
              ['--case', case, '--source', rank / 'best.pt', '--out', calibrated,
               '--epochs', t['calibration_epochs'],
               '--train-count', t['calibration_poses_per_epoch'],
               '--val-count', t['calibration_validation_poses'],
-              '--points', t['candidate_points'], '--samples', t['fps_points'],
+              '--points', t['fps_points'], '--samples', t['fps_points'],
               '--batch', t['calibration_batch'], '--lr', t['calibration_lr'],
               '--weight-decay', t['calibration_weight_decay'],
               '--smooth-l1-beta', t['calibration_smooth_l1_beta'],
@@ -220,6 +239,15 @@ def main():
         out = _path(args.out, run_dir / 'agent')
         _snapshot(out, config)
         teacher_path = _teacher_checkpoint(config, args.teacher)
+        if config['agent'].get('trainer') == 'continuous':
+            if not args.manifest:
+                parser.error('Continuous PPO requires --manifest for separate train/validation cases')
+            command = ['--config', args.config, '--manifest', args.manifest,
+                       '--teacher', teacher_path, '--out', out]
+            if args.checkpoint:
+                command += ['--resume', resolve(args.checkpoint)]
+            _run('occlusion_rl_offline.optimized_ppo', command)
+            return
         command = _agent_args(config, case, teacher_path, out,
                               checkpoint=resolve(args.checkpoint) if args.checkpoint else None,
                               train_cases=cohort['train'] if cohort else None,
@@ -234,6 +262,14 @@ def main():
         out = _path(args.out, run_dir / 'agent')
         teacher_path = _teacher_checkpoint(config, args.teacher)
         agent_path = _agent_checkpoint(config, args.agent)
+        if config['agent'].get('trainer') == 'continuous':
+            if not args.manifest:
+                parser.error('Continuous evaluation requires --manifest')
+            _run('occlusion_rl_offline.evaluation',
+                 ['--config', args.config, '--manifest', args.manifest, '--teacher', teacher_path,
+                  '--agent', agent_path, '--split', 'test', '--episodes', config['agent']['test_episodes'],
+                  '--horizons', config['agent']['horizon'], '--out', out / 'test_evaluation.json'])
+            return
         _run('occlusion_rl_offline.rl',
              _agent_args(config, case, teacher_path, out, eval_only=True,
                          checkpoint=agent_path, eval_cases=cohort['test'] if cohort else None))
