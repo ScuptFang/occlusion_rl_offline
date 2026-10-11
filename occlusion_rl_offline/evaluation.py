@@ -25,6 +25,10 @@ def load_agent(path, cfg, device='cpu', teacher_path=None):
         validate_teacher_pair(checkpoint, teacher_path)
     if checkpoint.get('model_options') is not None and checkpoint['model_options'] != cfg['model']:
         raise ValueError('Agent model/sampling configuration does not match checkpoint')
+    saved = checkpoint.get('agent_options', {})
+    for key in ('fps_points', 'policy_width', 'time_context'):
+        if key in saved and saved[key] != a.get(key, False if key == 'time_context' else None):
+            raise ValueError('Agent configuration does not match checkpoint: ' + key)
     agent.load_state_dict(checkpoint['model'])
     agent.eval()
     return agent

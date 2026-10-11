@@ -7,7 +7,8 @@ import numpy as np
 import torch
 import trimesh
 
-from .rl import Agent, PoseTask, load_teacher, teacher_score, action_steps, step_context, validate_teacher_pair
+from .rl import PoseTask, load_teacher, teacher_score, action_steps, step_context
+from .evaluation import load_agent
 
 
 def _task(case_path, cfg, device):
@@ -41,15 +42,7 @@ def infer_agent(case_path, teacher_path, agent_path, out_dir, cfg, upper_stl=Non
     task = _task(case_path, cfg, device)
     teacher = load_teacher(teacher_path, device, cfg['teacher']['fps_points'],
                            **cfg['model'])
-    policy = Agent(cfg['agent']['fps_points'], cfg['agent']['policy_width'],
-                   cfg['agent']['initial_log_std'],
-                   time_context=cfg['agent'].get('time_context', False), **cfg['model']).to(device)
-    checkpoint = torch.load(agent_path, map_location=device)
-    validate_teacher_pair(checkpoint, teacher_path)
-    if checkpoint.get('model_options') is not None and checkpoint['model_options'] != cfg['model']:
-        raise ValueError('Agent model/sampling configuration does not match checkpoint')
-    policy.load_state_dict(checkpoint['model'])
-    policy.eval()
+    policy = load_agent(agent_path, cfg, device, teacher_path)
     rotation = np.eye(3)[None]
     translation = np.zeros((1, 3))
     points = task.points_at(rotation, translation)

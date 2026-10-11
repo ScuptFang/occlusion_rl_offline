@@ -99,3 +99,5 @@ Teacher 位姿评分可视化：[打开评分视图](demo/teacher_scores.html)�
 每病例包含 279 个姿态：每轴旋转 −10° 到 +10°（0.5° 间隔），每轴平移 −4 到 +4 mm（0.2 mm 间隔），以及原始姿态加 32 个固定随机种子的组合姿态。旋转使用绕上颌顶点中心的旋转向量，组合姿态每分量范围 ±8°、±4 mm。采样沿用配置的 4096 个均匀候选顶点 → 距离加权 FPS 64 点，保留顶点法向和网格曲率；带符号距离由下颌最近顶点法向判断，不生成体积 SDF。背景表面点仅用于显示，不作为网络输入。模型路径和 SHA256 显示在界面中。train/val/test 标签沿用现有 manifest；010/011 曾用于探索，不代表全新独立测试集。
 
 最新训练/推理栈与 NVIDIA GPU 环境见 [GPU 使用说明](docs/gpu_training.md)。从头训练配置为 `configs/latest_gpu.json`；支持统一 `--device auto|cpu|cuda|cuda:N`，数据准备、teacher、PPO、评估、推理及 demo 的完整命令均在说明中。
+
+模仿学习课程的[128 点 / PPO 宽度 512 扩容配置与测试](docs/reagent_capacity.md)使用 `configs/reagent_curriculum_large.json`，保留原 64 点 / 宽度 128 配置作同起点对照。
