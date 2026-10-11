@@ -7,3 +7,15 @@ runs/
 build/
 dist/
 .venv-*/
+
+# Training artifacts stay local; do not add new demo/data/model blobs.
+/demo/
+/data/
+/examples/data/
+/examples/checkpoints/
+*.stl
+*.npz
+*.pt
+*.pth
+*.ckpt
+*.onnx

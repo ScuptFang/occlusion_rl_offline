@@ -1,5 +1,7 @@
 # occlusion_rl_offline
 
+
+新增 **ReAgent 启发的模仿学习 → 位姿/教师混合奖励 PPO**：使用 `configs/reagent_curriculum.json`，见 [流程、命令与测试结果](docs/reagent_curriculum.md)。该模式允许真实位姿仅在训练阶段提供专家标签和衰减奖励；下文 teacher-only 的奖励描述仅适用于旧模式。本次新增内容不包含 demo、病例数据或权重；现有分支历史中的文件不重复上传。
 当前状态与问题分析见[训练链路审计](docs/current_pipeline_review.md)，实验顺序及比较指标见[测试与优化计划](docs/recovery_test_plan.md)，已执行结果见[连续误差优化报告](docs/optimization_20261001_report.md)。优化目标为角度和平移误差越小越好，agent 执行完整动作预算、不提前停止；1.5°/0.5 mm 仅作历史参考。
 
 离线咬合姿态恢复实验仓库。输入是已经处于正确咬合关系的上、下颌 STL；训练时随机扰动上颌，冻结的 teacher 只提供咬合分数，PPO agent 学习逐步旋转和平移上颌。推理时输入**已偏移的上颌**及固定下颌的原始顶点/顶点法向，计算带符号最近顶点距离，不需要原始姿态标签或体积 SDF。

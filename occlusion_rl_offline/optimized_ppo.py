@@ -1,4 +1,4 @@
-"""Full-budget PPO with teacher-only rewards and continuous validation selection."""
+"""Full-budget PPO with optional imitation and ground-truth/teacher curriculum."""
 import argparse
 import os
 import hashlib
@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from torch import nn
 
+from .imitation import pretrain, expert_actions, mixed_reward, curriculum_weights, cloning_loss, validate_curriculum
 from .runtime import resolve_device, runtime_info
 from .cohort import read_manifest
 from .config import load_config, resolve
@@ -27,7 +28,10 @@ def advantages_and_returns(rewards, values, bootstrap, gamma, gae_lambda):
 
 def run(cfg, manifest, teacher_path, out, resume=None):
     device=resolve_device(cfg)
-    a=cfg['agent']; torch.set_num_threads(a.get('torch_threads',4))
+    a=cfg['agent']; hybrid=a.get('trainer') == 'imitation_curriculum'
+    il=a.get('imitation') if hybrid else None
+    if hybrid: validate_curriculum(il)
+    torch.set_num_threads(a.get('torch_threads',4))
     torch.manual_seed(a['seed']);np.random.seed(a['seed'])
     if a.get('score_gated_actions',False):raise ValueError('Continuous PPO cannot reject score-decreasing actions')
     paths=read_manifest(manifest);out.mkdir(parents=True,exist_ok=True)
@@ -50,6 +54,10 @@ def run(cfg, manifest, teacher_path, out, resume=None):
     if resume:
         ckpt=torch.load(resume,map_location=device)
         validate_teacher_pair(ckpt, teacher_path)
+        if ckpt['agent_options'].get('trainer') != a.get('trainer'):
+            raise ValueError('Resume trainer mismatch')
+        if hybrid and ckpt['agent_options'] != a:
+            raise ValueError('Resume curriculum/options mismatch; keep original schedule and total iterations')
         if ckpt['model_options']!=cfg['model']:raise ValueError('Resume sampler mismatch')
         for key in ('seed','horizon','parallel_envs','action_schedule','time_context','finite_horizon','reward_scale'):
             if ckpt['agent_options'].get(key)!=a.get(key):raise ValueError('Resume training option mismatch: '+key)
@@ -85,6 +93,14 @@ def run(cfg, manifest, teacher_path, out, resume=None):
     if not resume:
         initial=validation();(out/'untrained.json').write_text(json.dumps(initial,indent=2))
         print('untrained',json.dumps(initial['macro']),flush=True)
+    if hybrid and not resume:
+        pretrain(agent, paths['train'], task_for, cfg, device, out)
+        cloned=validation()
+        (out/'imitation_evaluation.json').write_text(json.dumps(cloned,indent=2))
+        torch.save({'model':agent.state_dict(),'model_options':cfg['model'],
+                    'agent_options':a,'teacher_checkpoint':str(teacher_path),
+                    'teacher_sha256':teacher_hash},out/'imitation.pt')
+        print('after_imitation',json.dumps(cloned['macro']),flush=True)
     stale=0
     for iteration in range(start,a['iterations']):
         frozen=iteration<a.get('freeze_encoder_iterations',0)
@@ -93,6 +109,8 @@ def run(cfg, manifest, teacher_path, out, resume=None):
         task.rng=np.random.RandomState(a['seed']+iteration*1009)
         rotations,translations,points=task.reset(a['parallel_envs'],a['training_pose_bands'])
         scores=teacher_score(teacher,points,device);rollout=[]
+        gt_weight,bc_weight=curriculum_weights(il,iteration,a['iterations']) if hybrid else (0.,0.)
+        expert_targets=[];reward_components=[]
         for step in range(a['horizon']):
             task.rotation_step_deg,task.translation_step_mm=action_steps(a,step)
             obs=task.observation(points);ctx=step_context(agent,len(points),step,a['horizon'],device)
@@ -100,9 +118,18 @@ def run(cfg, manifest, teacher_path, out, resume=None):
                 encoded=agent.encoder.encode(obs) if frozen else None
                 dist,value=(agent.distribution_encoded(encoded,ctx) if frozen else agent.distribution(obs,ctx))
                 raw=dist.sample();log_prob=dist.log_prob(raw).sum(-1)
+            if hybrid:
+                expert_targets.append(torch.as_tensor(expert_actions(rotations,translations,
+                    task.rotation_step_deg,task.translation_step_mm,il['expert_action_limit']),device=device))
             nr,nt,np_,ns,_,_=task.move_scored(rotations,translations,points,scores,
                                             torch.tanh(raw).cpu().numpy(),teacher,False)
-            reward=torch.tensor((ns-scores)*a['reward_scale'],dtype=torch.float32,device=device)
+            reward_array=(ns-scores)*a['reward_scale']
+            if hybrid:
+                reward_array,gt_reward,score_reward=mixed_reward(task,rotations,translations,nr,nt,
+                    scores,ns,a,il,gt_weight)
+                reward_components.append([float(gt_reward.mean()),float(score_reward.mean()),
+                    float(np.abs(gt_reward).mean()),float(np.abs(score_reward).mean())])
+            reward=torch.tensor(reward_array,dtype=torch.float32,device=device)
             rollout.append((obs,ctx,raw,log_prob,value,reward,encoded))
             rotations,translations,points,scores=nr,nt,np_,ns
         if a.get('finite_horizon',True):bootstrap=torch.zeros(a['parallel_envs'],device=device)
@@ -115,6 +142,7 @@ def run(cfg, manifest, teacher_path, out, resume=None):
         actions=torch.cat([r[2] for r in rollout]);oldlp=torch.cat([r[3] for r in rollout])
         old_values=torch.cat([r[4] for r in rollout]);returns=returns.flatten();adv=adv.flatten()
         adv=(adv-adv.mean())/adv.std(unbiased=False).clamp_min(1e-8)
+        targets=torch.cat(expert_targets) if hybrid else None
         stats=[]
         for epoch in range(a['ppo_epochs']):
             for ids in torch.randperm(len(actions),device=device).split(a['minibatch']):
@@ -124,11 +152,12 @@ def run(cfg, manifest, teacher_path, out, resume=None):
                 logratio=dist.log_prob(actions[ids]).sum(-1)-oldlp[ids];ratio=logratio.exp()
                 policy_loss=-torch.minimum(ratio*adv[ids],ratio.clamp(1-a['ppo_clip'],1+a['ppo_clip'])*adv[ids]).mean()
                 value_loss=(value-returns[ids]).square().mean();entropy=dist.entropy().sum(-1).mean()
-                loss=policy_loss+a['value_coef']*value_loss-a['entropy_coef']*entropy
+                bc_loss=cloning_loss(dist.mean,targets[ids]) if hybrid else torch.zeros((),device=device)
+                loss=policy_loss+a['value_coef']*value_loss-a['entropy_coef']*entropy+bc_weight*bc_loss
                 if not torch.isfinite(loss):raise FloatingPointError('Nonfinite PPO loss')
                 optimizer.zero_grad();loss.backward();nn.utils.clip_grad_norm_(agent.parameters(),a['max_grad_norm']);optimizer.step()
                 stats.append([float(policy_loss.detach()),float(value_loss.detach()),float(entropy.detach()),
-                              float(((ratio-1)-logratio).mean().detach()),float(((ratio-1).abs()>a['ppo_clip']).float().mean().detach())])
+                              float(((ratio-1)-logratio).mean().detach()),float(((ratio-1).abs()>a['ppo_clip']).float().mean().detach()),float(bc_loss.detach())])
             if np.mean(stats,axis=0)[3]>a.get('target_kl',.03):break  # Stop optimizer passes only, never rollout actions.
         with torch.no_grad():agent.log_std.clamp_(a.get('min_log_std',-3),a.get('max_log_std',.5))
         if (iteration+1)%a['log_every']==0 or iteration+1==a['iterations']:
@@ -136,10 +165,14 @@ def run(cfg, manifest, teacher_path, out, resume=None):
             value_var=float(returns.var(unbiased=False));ev=1-float((returns-old_values).var(unbiased=False))/max(value_var,1e-8)
             row={'iteration':iteration+1,'interactions':(iteration+1)*a['parallel_envs']*a['horizon'],
                  'reward_mean':float(torch.stack([r[5] for r in rollout]).mean()),
-                 'ppo':dict(zip(['policy_loss','value_loss','raw_entropy','approx_kl','clip_fraction'],map(float,np.mean(stats,axis=0)))),
+                 'ppo':dict(zip(['policy_loss','value_loss','raw_entropy','approx_kl','clip_fraction','bc_loss'],map(float,np.mean(stats,axis=0)))),
                  'explained_variance':ev,'action_mean':torch.tanh(actions).mean(0).tolist(),
                  'action_saturated_fraction':float((torch.tanh(actions).abs()>.95).float().mean()),
                  'log_std':agent.log_std.detach().tolist(),'encoder_frozen':frozen,'validation':result}
+            if hybrid:
+                row['curriculum']={'gt_weight':gt_weight,'teacher_weight':1-gt_weight,'bc_weight':bc_weight,
+                    **dict(zip(['gt_mean','teacher_mean','gt_abs_mean','teacher_abs_mean'],
+                               map(float,np.mean(reward_components,axis=0))))}
             history.append(row);(out/'history.json').write_text(json.dumps(history,indent=2))
             print(json.dumps({'iteration':iteration+1,'interactions':row['interactions'],'validation':result['macro'],'ppo':row['ppo']}),flush=True)
             improved=metric<best
@@ -153,7 +186,7 @@ def run(cfg, manifest, teacher_path, out, resume=None):
             torch.save(ckpt,out/'latest.pt')
             if improved:
                 torch.save(ckpt,out/'agent.pt');(out/'evaluation.json').write_text(json.dumps(result,indent=2))
-            if stale>=a.get('early_stopping_checks',100000):
+            if not hybrid and stale>=a.get('early_stopping_checks',100000):
                 print('Training validation plateau: all completed rollouts used full budget.',flush=True);break
     return best
 

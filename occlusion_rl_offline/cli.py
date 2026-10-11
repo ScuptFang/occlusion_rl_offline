@@ -117,7 +117,7 @@ def main():
     teacher.add_argument('--manifest', default=None)
     teacher.add_argument('--source', default=None)
     teacher.add_argument('--out', default=None)
-    agent = subs.add_parser('train-agent', help='Train PPO with teacher-score delta as sole reward')
+    agent = subs.add_parser('train-agent', help='Train teacher-only PPO or imitation/curriculum PPO from config')
     agent.add_argument('--case', default=None)
     agent.add_argument('--manifest', default=None)
     agent.add_argument('--teacher', default=None)
@@ -239,7 +239,7 @@ def main():
         out = _path(args.out, run_dir / 'agent')
         _snapshot(out, config)
         teacher_path = _teacher_checkpoint(config, args.teacher)
-        if config['agent'].get('trainer') == 'continuous':
+        if config['agent'].get('trainer') in ('continuous', 'imitation_curriculum'):
             if not args.manifest:
                 parser.error('Continuous PPO requires --manifest for separate train/validation cases')
             command = ['--config', args.config, '--manifest', args.manifest,
@@ -262,7 +262,7 @@ def main():
         out = _path(args.out, run_dir / 'agent')
         teacher_path = _teacher_checkpoint(config, args.teacher)
         agent_path = _agent_checkpoint(config, args.agent)
-        if config['agent'].get('trainer') == 'continuous':
+        if config['agent'].get('trainer') in ('continuous', 'imitation_curriculum'):
             if not args.manifest:
                 parser.error('Continuous evaluation requires --manifest')
             _run('occlusion_rl_offline.evaluation',

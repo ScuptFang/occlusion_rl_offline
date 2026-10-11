@@ -40,7 +40,7 @@ def load_config(path=None):
                      isinstance(pool_factor, bool) or not isinstance(pool_factor, int) or pool_factor < 1):
         raise ValueError('Contact FPS threshold and pool factor must be positive')
     a = config['agent']
-    if a.get('trainer') == 'continuous':
+    if a.get('trainer') in ('continuous', 'imitation_curriculum'):
         if a.get('score_gated_actions', False):
             raise ValueError('Continuous PPO must execute score-decreasing actions')
         if a.get('reward_scale', 1) <= 0 or not 0 < a.get('gamma', 1) <= 1:
@@ -55,6 +55,11 @@ def load_config(path=None):
         for key in ('horizon', 'parallel_envs', 'iterations', 'ppo_epochs', 'minibatch', 'log_every'):
             if not isinstance(a[key], int) or a[key] < 1:
                 raise ValueError('agent.%s must be a positive integer' % key)
+    if a.get('trainer') == 'imitation_curriculum':
+        from .imitation import validate_curriculum
+        validate_curriculum(a['imitation'])
+        if a['iterations'] < 2:
+            raise ValueError('Curriculum needs at least two PPO iterations')
     return config
 
 
