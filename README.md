@@ -101,3 +101,5 @@ Teacher 位姿评分可视化：[打开评分视图](demo/teacher_scores.html)�
 最新训练/推理栈与 NVIDIA GPU 环境见 [GPU 使用说明](docs/gpu_training.md)。从头训练配置为 `configs/latest_gpu.json`；支持统一 `--device auto|cpu|cuda|cuda:N`，数据准备、teacher、PPO、评估、推理及 demo 的完整命令均在说明中。
 
 模仿学习课程的[128 点 / PPO 宽度 512 扩容配置与测试](docs/reagent_capacity.md)使用 `configs/reagent_curriculum_large.json`，保留原 64 点 / 宽度 128 配置作同起点对照。
+
+[逐步 Diffusion Policy 实验](docs/diffusion_policy.md)使用 `configs/diffusion_policy.json`：从当前点云去噪预测 4 步动作，每次只执行首步再重规划，保存完整逐步轨迹，并与相同 128 点输入的 PPO 对照。

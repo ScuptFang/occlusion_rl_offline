@@ -117,7 +117,7 @@ def main():
     teacher.add_argument('--manifest', default=None)
     teacher.add_argument('--source', default=None)
     teacher.add_argument('--out', default=None)
-    agent = subs.add_parser('train-agent', help='Train teacher-only PPO or imitation/curriculum PPO from config')
+    agent = subs.add_parser('train-agent', help='Train PPO, imitation curriculum, or diffusion policy from config')
     agent.add_argument('--case', default=None)
     agent.add_argument('--manifest', default=None)
     agent.add_argument('--teacher', default=None)
@@ -237,17 +237,18 @@ def main():
                           'teacher_checkpoint': str(calibrated / 'best.pt')}))
     elif args.command == 'train-agent':
         out = _path(args.out, run_dir / 'agent')
-        _snapshot(out, config)
         teacher_path = _teacher_checkpoint(config, args.teacher)
-        if config['agent'].get('trainer') in ('continuous', 'imitation_curriculum'):
+        if config['agent'].get('trainer') in ('continuous', 'imitation_curriculum', 'diffusion'):
             if not args.manifest:
-                parser.error('Continuous PPO requires --manifest for separate train/validation cases')
+                parser.error('This trainer requires --manifest for separate train/validation cases')
             command = ['--config', args.config, '--manifest', args.manifest,
                        '--teacher', teacher_path, '--out', out]
             if args.checkpoint:
                 command += ['--resume', resolve(args.checkpoint)]
-            _run('occlusion_rl_offline.optimized_ppo', command)
+            module = 'train_diffusion' if config['agent']['trainer'] == 'diffusion' else 'optimized_ppo'
+            _run('occlusion_rl_offline.' + module, command)
             return
+        _snapshot(out, config)
         command = _agent_args(config, case, teacher_path, out,
                               checkpoint=resolve(args.checkpoint) if args.checkpoint else None,
                               train_cases=cohort['train'] if cohort else None,
@@ -262,7 +263,7 @@ def main():
         out = _path(args.out, run_dir / 'agent')
         teacher_path = _teacher_checkpoint(config, args.teacher)
         agent_path = _agent_checkpoint(config, args.agent)
-        if config['agent'].get('trainer') in ('continuous', 'imitation_curriculum'):
+        if config['agent'].get('trainer') in ('continuous', 'imitation_curriculum', 'diffusion'):
             if not args.manifest:
                 parser.error('Continuous evaluation requires --manifest')
             _run('occlusion_rl_offline.evaluation',

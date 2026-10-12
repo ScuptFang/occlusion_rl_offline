@@ -11,21 +11,31 @@ from scipy.spatial.transform import Rotation
 from .runtime import resolve_device
 from .config import load_config, resolve
 from .cohort import read_manifest
-from .rl import Agent, PoseTask, load_teacher, teacher_score, action_steps, step_context, continuous_error, validate_teacher_pair
+from .rl import Agent, PoseTask, load_teacher, teacher_score, action_steps, step_context, continuous_error, validate_teacher_pair, policy_action
 
 BANDS = [('zero', 0., 0.), ('near', 1.5, .5), ('medium', 4., 2.), ('wide', 8., 4.)]
 
 
 def load_agent(path, cfg, device='cpu', teacher_path=None):
     a = cfg['agent']
-    agent = Agent(a['fps_points'], a['policy_width'], a['initial_log_std'],
-                  time_context=a.get('time_context', False), **cfg['model']).to(device)
+    if a.get('trainer') == 'diffusion':
+        from .diffusion import DiffusionAgent
+        agent = DiffusionAgent(a, cfg['model']).to(device)
+    else:
+        agent = Agent(a['fps_points'], a['policy_width'], a['initial_log_std'],
+                      time_context=a.get('time_context', False), **cfg['model']).to(device)
     checkpoint = torch.load(path, map_location=device)
     if teacher_path is not None:
         validate_teacher_pair(checkpoint, teacher_path)
     if checkpoint.get('model_options') is not None and checkpoint['model_options'] != cfg['model']:
         raise ValueError('Agent model/sampling configuration does not match checkpoint')
     saved = checkpoint.get('agent_options', {})
+    if (saved.get('trainer') == 'diffusion') != (a.get('trainer') == 'diffusion'):
+        raise ValueError('Agent trainer does not match checkpoint')
+    if a.get('trainer') == 'diffusion':
+        for key, value in saved['diffusion'].items():
+            if key not in ('sampling_seed', 'inference_steps') and a['diffusion'].get(key) != value:
+                raise ValueError('Diffusion configuration does not match checkpoint: ' + key)
     for key in ('fps_points', 'policy_width', 'time_context'):
         if key in saved and saved[key] != a.get(key, False if key == 'time_context' else None):
             raise ValueError('Agent configuration does not match checkpoint: ' + key)
@@ -43,10 +53,11 @@ def start_bank(case_id, band_index, episodes, seed):
 
 
 def evaluate_continuous(agent, teacher, paths, cfg, episodes=32, seed=426101,
-                        horizons=(10, 20, 40), mode='agent', details=True):
+                        horizons=(10, 20, 40), mode='agent', details=True, sampling_seed=None):
     a = cfg['agent']
     device = str(next(agent.parameters()).device)
     scales = a.get('error_scales', [8., 4.])
+    sampling_seed = a.get('diffusion', {}).get('sampling_seed', 91001) if sampling_seed is None else sampling_seed
     rows = []
     for path in paths:
         case_id = Path(path).parent.name
@@ -61,6 +72,7 @@ def evaluate_continuous(agent, teacher, paths, cfg, episodes=32, seed=426101,
             initial_ids = task.last_ids.copy()
             scores = teacher_score(teacher, points, device)
             rng = np.random.RandomState(seed + int(case_id) * 1709 + bi * 3001)
+            generator = torch.Generator(device=device).manual_seed(sampling_seed + int(case_id) * 1709 + bi * 3001)
             trace, snapshots = [], {}
             initial_angle, initial_distance = task.error(r, t)
             initial_score = scores.copy()
@@ -95,7 +107,10 @@ def evaluate_continuous(agent, teacher, paths, cfg, episodes=32, seed=426101,
                 with torch.no_grad():
                     if mode == 'agent':
                         ctx = step_context(agent, n, step, max(horizons), device)
-                        action = torch.tanh(agent(obs, ctx)[0]).cpu().numpy()
+                        action_tensor, plan = policy_action(agent, obs, ctx, generator)
+                        action = action_tensor.cpu().numpy()
+                        if details and plan is not None:
+                            trace[-1]['planned_actions'] = plan.cpu().tolist()
                     elif mode == 'random':
                         action = rng.uniform(-1, 1, (n, 6))
                     elif mode == 'constant':
@@ -104,7 +119,9 @@ def evaluate_continuous(agent, teacher, paths, cfg, episodes=32, seed=426101,
                         raise ValueError(mode)
                 if details:
                     trace[-1]['action'] = action.tolist()
-                r, t, points, scores, _, _ = task.move_scored(r, t, points, scores, action, teacher, False)
+                r, t, points, scores, valid, accepted = task.move_scored(r, t, points, scores, action, teacher, False)
+                if details:
+                    trace[-1].update(valid_action=valid.tolist(), accepted_action=accepted.tolist())
             row = {'case': case_id, 'band': band_name, 'episodes': n,
                    'initial_rotation_deg': float(initial_angle.mean()),
                    'initial_translation_mm': float(initial_distance.mean()),
@@ -112,11 +129,12 @@ def evaluate_continuous(agent, teacher, paths, cfg, episodes=32, seed=426101,
                    'checkpoints': snapshots}
             if details:
                 row.update(initial_rotations=initial_r.tolist(), initial_translations=initial_t.tolist(),
-                           initial_vertex_ids=initial_ids.tolist(), trace=trace)
+                           initial_vertex_ids=initial_ids.tolist(), pivot=task.pivot.tolist(), trace=trace)
             rows.append(row)
     macro = {str(h): {k: float(np.mean([r['checkpoints'][str(h)][k] for r in rows if r['band'] != 'zero']))
                       for k in rows[1]['checkpoints'][str(h)]} for h in horizons}
-    return {'seed': seed, 'mode': mode, 'episodes_per_nonzero_band': episodes,
+    return {'seed': seed, 'sampling_seed': sampling_seed if a.get('trainer') == 'diffusion' else None,
+            'mode': mode, 'episodes_per_nonzero_band': episodes,
             'horizons': list(horizons), 'error_scales': scales,
             'note': 'Full-budget actions; zero band separate from equally weighted case/band macro. Intermediate checkpoints are prefixes of the longest rollout.',
             'initial_macro_error': float(np.mean([r['initial_error'] for r in rows if r['band'] != 'zero'])),

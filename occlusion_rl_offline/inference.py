@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import trimesh
 
-from .rl import PoseTask, load_teacher, teacher_score, action_steps, step_context
+from .rl import PoseTask, load_teacher, teacher_score, action_steps, step_context, policy_action
 from .evaluation import load_agent
 
 
@@ -50,11 +50,13 @@ def infer_agent(case_path, teacher_path, agent_path, out_dir, cfg, upper_stl=Non
     history = [{'step': 0, 'teacher_logit': float(score[0]),
                 'matrix': _matrix(rotation[0], translation[0], task.pivot).tolist()}]
     horizon = cfg['inference']['steps'] if steps is None else steps
+    generator = torch.Generator(device=device).manual_seed(cfg['agent'].get('diffusion', {}).get('sampling_seed', 91001))
     for step in range(horizon):
         task.rotation_step_deg, task.translation_step_mm = action_steps(cfg['agent'], step)
         with torch.no_grad():
             context = step_context(policy, len(points), step, horizon, device)
-            action = torch.tanh(policy(task.observation(points), context)[0]).cpu().numpy()
+            action_tensor, plan = policy_action(policy, task.observation(points), context, generator)
+            action = action_tensor.cpu().numpy()
         rotation, translation, points, score, valid, accepted = task.move_scored(
             rotation, translation, points, score, action, teacher,
             cfg['agent'].get('score_gated_actions', False))
@@ -62,11 +64,14 @@ def infer_agent(case_path, teacher_path, agent_path, out_dir, cfg, upper_stl=Non
                         'action': action[0].tolist(), 'valid_sdf': bool(valid[0]),
                         'accepted_action': bool(accepted[0]),
                         'matrix': _matrix(rotation[0], translation[0], task.pivot).tolist()})
+        if plan is not None:
+            history[-1]['planned_actions'] = plan[0].cpu().tolist()
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     final = _matrix(rotation[0], translation[0], task.pivot)
     result = {'case': str(case_path), 'teacher_checkpoint': str(teacher_path),
               'agent_checkpoint': str(agent_path), 'steps': horizon,
+              'sampling_seed': cfg['agent'].get('diffusion', {}).get('sampling_seed'),
               'initial_teacher_logit': history[0]['teacher_logit'],
               'final_teacher_logit': history[-1]['teacher_logit'],
               'input_to_recovered_matrix': final.tolist(), 'trajectory': history,

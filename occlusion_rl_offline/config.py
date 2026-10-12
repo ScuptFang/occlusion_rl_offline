@@ -40,7 +40,7 @@ def load_config(path=None):
                      isinstance(pool_factor, bool) or not isinstance(pool_factor, int) or pool_factor < 1):
         raise ValueError('Contact FPS threshold and pool factor must be positive')
     a = config['agent']
-    if isinstance(a['policy_width'], bool) or not isinstance(a['policy_width'], int) or a['policy_width'] < 1:
+    if a.get('trainer') != 'diffusion' and (isinstance(a['policy_width'], bool) or not isinstance(a['policy_width'], int) or a['policy_width'] < 1):
         raise ValueError('agent.policy_width must be a positive integer')
     if a.get('trainer') in ('continuous', 'imitation_curriculum'):
         if a.get('score_gated_actions', False):
@@ -62,6 +62,9 @@ def load_config(path=None):
         validate_curriculum(a['imitation'])
         if a['iterations'] < 2:
             raise ValueError('Curriculum needs at least two PPO iterations')
+    if a.get('trainer') == 'diffusion':
+        from .diffusion import validate_options
+        validate_options(a)
     return config
 
 

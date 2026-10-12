@@ -164,6 +164,14 @@ class Agent(nn.Module):
         return Normal(mean, self.log_std.exp().expand_as(mean)), value
 
 
+def policy_action(agent, observations, context, generator=None):
+    """Return the executed action and optional newly predicted action chunk."""
+    if hasattr(agent, 'predict_action_chunk'):
+        plan = agent.predict_action_chunk(observations, context, generator=generator)
+        return plan[:, 0], plan
+    return torch.tanh(agent(observations, context)[0]), None
+
+
 def step_context(agent, count, step, horizon, device):
     if not agent.time_context:
         return None
