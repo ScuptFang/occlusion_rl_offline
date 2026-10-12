@@ -18,6 +18,8 @@ def load_config(path=None):
     for section in ('paths', 'prepare', 'model', 'teacher', 'agent', 'inference'):
         if section not in config:
             raise ValueError('Missing config section: %s' % section)
+    if config['model'].get('distance_method', 'nearest_vertex') not in ('nearest_vertex', 'nearest_surface'):
+        raise ValueError('Unknown model.distance_method')
     layers = config['model'].get('encoder_layers', 3)
     if isinstance(layers, bool) or not isinstance(layers, int) or layers < 1:
         raise ValueError('model.encoder_layers must be a positive integer')
@@ -39,8 +41,26 @@ def load_config(path=None):
     if fraction and (config['model'].get('contact_fps_max_mm', 0.6) <= 0 or
                      isinstance(pool_factor, bool) or not isinstance(pool_factor, int) or pool_factor < 1):
         raise ValueError('Contact FPS threshold and pool factor must be positive')
+    if config['teacher'].get('trainer') == 'aligned_pair':
+        o = config['teacher']['aligned_pair']
+        for key in ('train_pairs_per_case', 'validation_pairs_per_case', 'test_pairs_per_case', 'batch_size'):
+            if isinstance(o[key], bool) or not isinstance(o[key], int) or o[key] < 1:
+                raise ValueError('aligned_pair.' + key + ' must be positive integer')
+        if len(o['quality_scales']) != 2 or min(o['quality_scales']) <= 0:
+            raise ValueError('Two positive quality scales required')
+        if o['quality_scales'] != [config['teacher']['quality_rotation_scale_deg'],
+                                    config['teacher']['quality_translation_scale_mm']]:
+            raise ValueError('Ranking/calibration quality scales must agree')
+        if min(o['delta_beta'], o['regression_beta'], o['tie_epsilon'], o['margin_fraction']) <= 0:
+            raise ValueError('Loss scales must be positive')
+        for stage in ('ranking', 'calibration'):
+            w = o[stage + '_weights']
+            if min(w.values()) < 0 or sum(w.values()) <= 0:
+                raise ValueError('Invalid aligned pair loss weights')
+        if o['calibration_weights']['ranking'] <= 0 or o['calibration_weights']['delta'] <= 0:
+            raise ValueError('Calibration must retain ranking and delta supervision')
     a = config['agent']
-    if a.get('trainer') != 'diffusion' and (isinstance(a['policy_width'], bool) or not isinstance(a['policy_width'], int) or a['policy_width'] < 1):
+    if a.get('trainer') not in ('diffusion', 'diffusion_rl') and (isinstance(a['policy_width'], bool) or not isinstance(a['policy_width'], int) or a['policy_width'] < 1):
         raise ValueError('agent.policy_width must be a positive integer')
     if a.get('trainer') in ('continuous', 'imitation_curriculum'):
         if a.get('score_gated_actions', False):
@@ -62,7 +82,7 @@ def load_config(path=None):
         validate_curriculum(a['imitation'])
         if a['iterations'] < 2:
             raise ValueError('Curriculum needs at least two PPO iterations')
-    if a.get('trainer') == 'diffusion':
+    if a.get('trainer') in ('diffusion', 'diffusion_rl'):
         from .diffusion import validate_options
         validate_options(a)
     return config

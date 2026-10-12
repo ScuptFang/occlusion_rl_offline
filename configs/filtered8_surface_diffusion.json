@@ -1,0 +1,189 @@
+{
+  "paths": {
+    "case": "runs/teacher_refinement/prepared/cases/010/case.npz",
+    "upper_stl": "../data/010/upper.stl",
+    "lower_stl": "../data/010/lower.stl",
+    "packaged_teacher": "runs/filtered8_surface_diffusion/teacher/calibration/best.pt",
+    "packaged_agent": "runs/filtered8_surface_diffusion/agent/agent.pt",
+    "run_dir": "runs/filtered8_surface_diffusion",
+    "initial_teacher": "examples/checkpoints/teacher_initial.pt"
+  },
+  "cohort": {
+    "upper_filename": "upper.stl",
+    "lower_filename": "lower.stl",
+    "split_seed": 42,
+    "validation_fraction": 0.17,
+    "test_fraction": 0.17
+  },
+  "prepare": {
+    "seed": 42
+  },
+  "model": {
+    "width": 64,
+    "k": 16,
+    "encoder_layers": 3,
+    "fps_strength": 1.5,
+    "contact_scales": [
+      0.15,
+      0.6,
+      1.5
+    ],
+    "weight_floor": 0.15,
+    "contact_threshold": 0.15,
+    "penetration_threshold": -0.1,
+    "stat_clip_mm": 3.0,
+    "candidate_points": 4096,
+    "point_seed": 42,
+    "contact_fps_fraction": 0.5,
+    "contact_fps_max_mm": 0.6,
+    "contact_fps_pool_factor": 4,
+    "distance_method": "nearest_surface"
+  },
+  "teacher": {
+    "fps_points": 128,
+    "ranking_epochs": 32,
+    "ranking_lr": 0.0001,
+    "ranking_weight_decay": 0.0001,
+    "calibration_epochs": 32,
+    "calibration_lr": 0.0001,
+    "calibration_weight_decay": 0.0001,
+    "calibration_max_grad_norm": 1.0,
+    "quality_rotation_scale_deg": 8.0,
+    "quality_translation_scale_mm": 4.0,
+    "seed": 42,
+    "trainer": "aligned_pair",
+    "aligned_pair": {
+      "train_pairs_per_case": 128,
+      "validation_pairs_per_case": 128,
+      "test_pairs_per_case": 256,
+      "batch_size": 16,
+      "quality_scales": [
+        8.0,
+        4.0
+      ],
+      "pose_bands": [
+        {
+          "probability": 0.1,
+          "rotation_deg": 0.0,
+          "translation_mm": 0.0
+        },
+        {
+          "probability": 0.3,
+          "rotation_deg": 1.5,
+          "translation_mm": 0.5
+        },
+        {
+          "probability": 0.3,
+          "rotation_deg": 8.0,
+          "translation_mm": 4.0
+        },
+        {
+          "probability": 0.3,
+          "rotation_deg": 20.0,
+          "translation_mm": 8.0
+        }
+      ],
+      "local_steps": [
+        [
+          0.05,
+          0.01
+        ],
+        [
+          0.25,
+          0.05
+        ],
+        [
+          0.5,
+          0.1
+        ],
+        [
+          2.0,
+          0.4
+        ]
+      ],
+      "tie_epsilon": 1e-05,
+      "margin_fraction": 0.5,
+      "regression_beta": 0.5,
+      "delta_beta": 0.05,
+      "ranking_weights": {
+        "regression": 0.1,
+        "ranking": 1.0,
+        "delta": 1.0
+      },
+      "calibration_weights": {
+        "regression": 1.0,
+        "ranking": 0.5,
+        "delta": 1.0
+      }
+    }
+  },
+  "agent": {
+    "fps_points": 128,
+    "seed": 61001,
+    "start_rotation_deg": 8.0,
+    "start_translation_mm": 4.0,
+    "action_rotation_step_deg": 2.0,
+    "action_translation_step_mm": 0.4,
+    "horizon": 10,
+    "validation_episodes": 8,
+    "test_episodes": 32,
+    "score_gated_actions": false,
+    "training_pose_bands": [
+      {
+        "probability": 0.1,
+        "rotation_deg": 0.0,
+        "translation_mm": 0.0
+      },
+      {
+        "probability": 0.4,
+        "rotation_deg": 1.5,
+        "translation_mm": 0.5
+      },
+      {
+        "probability": 0.3,
+        "rotation_deg": 4.0,
+        "translation_mm": 2.0
+      },
+      {
+        "probability": 0.2,
+        "rotation_deg": 8.0,
+        "translation_mm": 4.0
+      }
+    ],
+    "trainer": "diffusion",
+    "time_context": true,
+    "validation_seed": 426101,
+    "error_scales": [
+      8.0,
+      4.0
+    ],
+    "torch_threads": 4,
+    "diffusion": {
+      "prediction_horizon": 4,
+      "noise_steps": 100,
+      "inference_steps": 20,
+      "hidden_width": 256,
+      "hidden_layers": 3,
+      "time_embed_dim": 64,
+      "training_steps": 2800,
+      "batch_size": 64,
+      "episodes_per_case": 64,
+      "collection_batch": 8,
+      "validate_every": 280,
+      "learning_rate": 0.0003,
+      "encoder_learning_rate": 1e-05,
+      "weight_decay": 1e-06,
+      "max_grad_norm": 1.0,
+      "ema_decay": 0.995,
+      "random_action_probability": 0.2,
+      "sampling_seed": 91001
+    }
+  },
+  "inference": {
+    "steps": 10,
+    "out_dir": "runs/filtered8_surface_diffusion/inference"
+  },
+  "runtime": {
+    "device": "auto"
+  }
+}

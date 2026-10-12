@@ -5,8 +5,13 @@ import torch
 from torch.utils.data import Dataset, Sampler
 from scipy.spatial import cKDTree
 
-def sample_sdf(case, xyz):
-    """Signed nearest-lower-vertex distance; no volumetric grid or watertight test."""
+def sample_sdf(case, xyz, options=None):
+    """Configured signed vertex/surface distance; no volumetric inside/outside test."""
+    if (options or {}).get('distance_method', 'nearest_vertex') == 'nearest_surface':
+        from .surface import surface_distance
+        return surface_distance(case, xyz)[0]
+    if (options or {}).get('distance_method', 'nearest_vertex') != 'nearest_vertex':
+        raise ValueError('Unknown distance_method')
     if '_lower_tree' not in case:
         case['_lower_tree'] = cKDTree(case['lower_xyz'])
     distance, ids = case['_lower_tree'].query(xyz, workers=-1 if len(xyz) >= 4096 else 1)
@@ -41,7 +46,7 @@ def sample_upper_mesh(case, xyz, normal, count, fps_options=None, return_indices
     if len(xyz) != len(ids):
         raise ValueError('Candidate positions and original vertex IDs must match')
     xyz = np.asarray(xyz, dtype=np.float32)
-    d = sample_sdf(case, xyz) if precomputed_sdf is None else precomputed_sdf
+    d = sample_sdf(case, xyz, options) if precomputed_sdf is None else precomputed_sdf
     absolute = np.abs(d)
     scales = options.get('contact_scales', (0.15, 0.6, 1.5))
     importance = (options.get('weight_floor', 0.15)
@@ -112,6 +117,8 @@ def load_case(path):
         if any(k not in f for k in required):
             raise ValueError('%s requires nearest-vertex format; rerun prepare from STL (keys: %s)' % (path, required))
         case = {k: f[k].astype(np.float32) for k in required}
+        if 'lower_faces' in f:
+            case['lower_faces'] = f['lower_faces'].astype(np.int64)
     n = len(case['xyz'])
     assert case['xyz'].shape == (n, 3) and case['normal'].shape == (n, 3)
     assert case['curvature'].shape in ((n,), (n, 1))

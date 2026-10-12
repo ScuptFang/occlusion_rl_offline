@@ -58,9 +58,17 @@ def prepare_case(upper_path, lower_path, out_path, cfg):
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out, xyz=xyz, normal=normal, curvature=curvature,
-                        lower_xyz=lower_xyz, lower_normal=lower_normal)
+                        lower_xyz=lower_xyz, lower_normal=lower_normal,
+                        lower_faces=np.asarray(lower.faces, dtype=np.int64))
     case = load_case(out)
-    probe = sample_sdf(case, xyz[:min(2048, len(xyz))])
+    points = xyz[:min(2048, len(xyz))]
+    confident = None
+    if cfg.get('model', {}).get('distance_method') == 'nearest_surface':
+        from .surface import surface_distance
+        probe, confidence = surface_distance(case, points)
+        confident = float(confidence.mean())
+    else:
+        probe = sample_sdf(case, points, cfg.get('model'))
     audit = {'upper_stl': str(upper_path), 'lower_stl': str(lower_path),
              'upper_watertight': bool(upper.is_watertight),
              'lower_watertight': bool(lower.is_watertight),
@@ -70,7 +78,11 @@ def prepare_case(upper_path, lower_path, out_path, cfg):
              'lower_points': len(lower_xyz),
              'probe_sdf_negative_fraction': float((probe < 0).mean()),
              'probe_sdf_near_0_6mm_fraction': float((np.abs(probe) < .6).mean()),
-             'sdf_method': 'nearest original lower mesh vertex; sign from its vertex normal; no grid',
+             'sdf_method': cfg.get('model', {}).get('distance_method', 'nearest_vertex'),
+             'lower_faces': len(lower.faces),
+             'probe_sign_confident_fraction': confident,
+             'degenerate_lower_faces_excluded_from_surface_query': case.get('_surface_degenerate_faces'),
+             'sign_method': 'local vertex normal; no volumetric inside/outside',
              'config': cfg}
     (out.parent / (out.stem + '.audit.json')).write_text(json.dumps(audit, indent=2))
     return case, audit

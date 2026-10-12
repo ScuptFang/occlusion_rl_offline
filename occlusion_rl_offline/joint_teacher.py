@@ -59,11 +59,11 @@ def build_bank(paths, cfg, count, seed, augment=True):
                     pivot = case['xyz'].mean(0)
                     xyz = ((case['xyz'][initial_ids]-pivot)@rotation.T+pivot+p[3:]).astype(np.float32)
                     normals = case['normal'][initial_ids]@rotation.T
-                    features.append(np.column_stack((xyz,normals,case['curvature'][initial_ids],sample_sdf(case,xyz))).astype(np.float32))
+                    features.append(np.column_stack((xyz,normals,case['curvature'][initial_ids],sample_sdf(case,xyz,options))).astype(np.float32))
                 elif options.get('sampling_mode') == 'episode_fixed' and slot == 2 and not augment:
                     pivot = case['xyz'].mean(0)
                     xyz = ((case['xyz'][initial_ids]-pivot)@rotation.T+pivot+p[3:]).astype(np.float32)
-                    features.append(np.column_stack((xyz,case['normal'][initial_ids]@rotation.T,case['curvature'][initial_ids],sample_sdf(case,xyz))).astype(np.float32))
+                    features.append(np.column_stack((xyz,case['normal'][initial_ids]@rotation.T,case['curvature'][initial_ids],sample_sdf(case,xyz,options))).astype(np.float32))
                 else:
                     feature, selected = features_at_pose(case, rotation, p[3:], t['fps_points'], sampler, True)
                     features.append(feature)

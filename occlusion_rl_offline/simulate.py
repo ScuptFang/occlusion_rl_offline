@@ -24,7 +24,8 @@ def perturb_case(case_path, out_case, rotvec_deg, translation_mm, upper_stl=None
     out_case = Path(out_case)
     out_case.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out_case, xyz=xyz, normal=normal, curvature=case['curvature'],
-                        lower_xyz=case['lower_xyz'], lower_normal=case['lower_normal'])
+                        lower_xyz=case['lower_xyz'], lower_normal=case['lower_normal'],
+                        **({'lower_faces': case['lower_faces']} if 'lower_faces' in case else {}))
     matrix = np.eye(4)
     matrix[:3, :3] = rotation
     matrix[:3, 3] = pivot + translation - rotation @ pivot

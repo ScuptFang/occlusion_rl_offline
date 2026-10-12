@@ -41,7 +41,7 @@ class PoseTask:
             xyz = (np.einsum('bnj,bij->bni', self.xyz[self.episode_ids] - self.pivot, rotations)
                    + self.pivot + translations[:, None]).astype(np.float32)
             normal = np.einsum('bnj,bij->bni', self.normal[self.episode_ids], rotations)
-            distances = sample_sdf(self.case, xyz.reshape(-1, 3)).reshape(len(rotations), -1)
+            distances = sample_sdf(self.case, xyz.reshape(-1, 3), self.fps_options).reshape(len(rotations), -1)
             self.last_ids = self.episode_ids
             return np.concatenate((xyz, normal, self.case['curvature'][self.episode_ids].reshape(len(rotations), -1, 1),
                                    distances[:, :, None]), axis=-1).astype(np.float32)
@@ -49,7 +49,7 @@ class PoseTask:
         xyz = (np.einsum('nj,bij->bni', self.xyz[ids] - self.pivot, rotations)
                + self.pivot + translations[:, None]).astype(np.float32)
         normal = np.einsum('nj,bij->bni', self.normal[ids], rotations)
-        distances = sample_sdf(self.case, xyz.reshape(-1, 3)).reshape(len(rotations), -1)
+        distances = sample_sdf(self.case, xyz.reshape(-1, 3), self.fps_options).reshape(len(rotations), -1)
         selected = [sample_upper_mesh(self.case, x, n, self.points, self.fps_options,
                                      return_indices=True, preselected_ids=ids, precomputed_sdf=d)
                     for x, n, d in zip(xyz, normal, distances)]

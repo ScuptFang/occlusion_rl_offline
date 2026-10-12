@@ -117,7 +117,7 @@ def main():
     teacher.add_argument('--manifest', default=None)
     teacher.add_argument('--source', default=None)
     teacher.add_argument('--out', default=None)
-    agent = subs.add_parser('train-agent', help='Train PPO, imitation curriculum, or diffusion policy from config')
+    agent = subs.add_parser('train-agent', help='Train PPO, diffusion imitation, or diffusion RL from config')
     agent.add_argument('--case', default=None)
     agent.add_argument('--manifest', default=None)
     agent.add_argument('--teacher', default=None)
@@ -153,12 +153,12 @@ def main():
         upper = _path(args.upper, config['paths']['upper_stl'])
         lower = _path(args.lower, config['paths']['lower_stl'])
         out = _path(args.out, run_dir / 'prepared/case.npz')
-        _, audit = prepare_case(upper, lower, out, config['prepare'])
+        _, audit = prepare_case(upper, lower, out, dict(config['prepare'], model=config['model']))
         print(json.dumps({'case': str(out), 'audit': audit}, indent=2))
     elif args.command == 'prepare-batch':
         c = config['cohort']
         out = _path(args.out, run_dir / 'cohort')
-        manifest, counts = prepare_batch(resolve(args.input_dir), out, config['prepare'],
+        manifest, counts = prepare_batch(resolve(args.input_dir), out, dict(config['prepare'], model=config['model']),
                                          c['upper_filename'], c['lower_filename'],
                                          c['split_seed'], c['validation_fraction'],
                                          c['test_fraction'], args.skip_existing)
@@ -172,10 +172,10 @@ def main():
         print(json.dumps({'manifest': str(manifest), 'counts': counts}, indent=2))
     elif args.command == 'inspect-data':
         data = load_case(case)
-        probe = sample_sdf(data, data['xyz'][:min(4096, len(data['xyz']))])
+        probe = sample_sdf(data, data['xyz'][:min(4096, len(data['xyz']))], config['model'])
         print(json.dumps({'case': str(case), 'upper_points': len(data['xyz']),
                           'lower_points': len(data['lower_xyz']),
-                          'distance_method': 'nearest lower mesh vertex; vertex-normal sign',
+                          'distance_method': config['model'].get('distance_method', 'nearest_vertex'),
                           'probe_negative_fraction': float((probe < 0).mean()),
                           'probe_within_0_6mm': float((np.abs(probe) < .6).mean())}, indent=2))
     elif args.command == 'perturb':
@@ -188,6 +188,14 @@ def main():
         t = config['teacher']
         out = _path(args.out, run_dir / 'teacher')
         _snapshot(out, config)
+        if t.get('trainer') == 'aligned_pair':
+            if not args.manifest:
+                parser.error('Aligned-pair teacher requires --manifest')
+            if args.source:
+                parser.error('Aligned-pair experiment initializes from scratch')
+            _run('occlusion_rl_offline.aligned_teacher',
+                 ['--config', args.config, '--manifest', args.manifest, '--out', out])
+            return
         if t.get('trainer') == 'joint':
             if not args.manifest:
                 parser.error('Joint teacher training requires --manifest')
@@ -238,14 +246,14 @@ def main():
     elif args.command == 'train-agent':
         out = _path(args.out, run_dir / 'agent')
         teacher_path = _teacher_checkpoint(config, args.teacher)
-        if config['agent'].get('trainer') in ('continuous', 'imitation_curriculum', 'diffusion'):
+        if config['agent'].get('trainer') in ('continuous', 'imitation_curriculum', 'diffusion', 'diffusion_rl'):
             if not args.manifest:
                 parser.error('This trainer requires --manifest for separate train/validation cases')
             command = ['--config', args.config, '--manifest', args.manifest,
                        '--teacher', teacher_path, '--out', out]
             if args.checkpoint:
                 command += ['--resume', resolve(args.checkpoint)]
-            module = 'train_diffusion' if config['agent']['trainer'] == 'diffusion' else 'optimized_ppo'
+            module = {'diffusion': 'train_diffusion', 'diffusion_rl': 'train_diffusion_rl'}.get(config['agent']['trainer'], 'optimized_ppo')
             _run('occlusion_rl_offline.' + module, command)
             return
         _snapshot(out, config)
@@ -263,7 +271,7 @@ def main():
         out = _path(args.out, run_dir / 'agent')
         teacher_path = _teacher_checkpoint(config, args.teacher)
         agent_path = _agent_checkpoint(config, args.agent)
-        if config['agent'].get('trainer') in ('continuous', 'imitation_curriculum', 'diffusion'):
+        if config['agent'].get('trainer') in ('continuous', 'imitation_curriculum', 'diffusion', 'diffusion_rl'):
             if not args.manifest:
                 parser.error('Continuous evaluation requires --manifest')
             _run('occlusion_rl_offline.evaluation',

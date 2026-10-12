@@ -18,7 +18,10 @@ BANDS = [('zero', 0., 0.), ('near', 1.5, .5), ('medium', 4., 2.), ('wide', 8., 4
 
 def load_agent(path, cfg, device='cpu', teacher_path=None):
     a = cfg['agent']
-    if a.get('trainer') == 'diffusion':
+    if a.get('trainer') == 'diffusion_rl':
+        from .diffusion_rl import DiffusionRLAgent
+        agent = DiffusionRLAgent(a, cfg['model']).to(device)
+    elif a.get('trainer') == 'diffusion':
         from .diffusion import DiffusionAgent
         agent = DiffusionAgent(a, cfg['model']).to(device)
     else:
@@ -30,11 +33,13 @@ def load_agent(path, cfg, device='cpu', teacher_path=None):
     if checkpoint.get('model_options') is not None and checkpoint['model_options'] != cfg['model']:
         raise ValueError('Agent model/sampling configuration does not match checkpoint')
     saved = checkpoint.get('agent_options', {})
-    if (saved.get('trainer') == 'diffusion') != (a.get('trainer') == 'diffusion'):
+    if saved.get('trainer') != a.get('trainer') and ({saved.get('trainer'), a.get('trainer')} & {'diffusion', 'diffusion_rl'}):
         raise ValueError('Agent trainer does not match checkpoint')
-    if a.get('trainer') == 'diffusion':
+    if a.get('trainer') == 'diffusion_rl' and saved.get('diffusion_rl') != a.get('diffusion_rl'):
+        raise ValueError('Diffusion RL configuration mismatch')
+    if a.get('trainer') in ('diffusion', 'diffusion_rl'):
         for key, value in saved['diffusion'].items():
-            if key not in ('sampling_seed', 'inference_steps') and a['diffusion'].get(key) != value:
+            if key not in (('sampling_seed',) if a.get('trainer') == 'diffusion_rl' else ('sampling_seed', 'inference_steps')) and a['diffusion'].get(key) != value:
                 raise ValueError('Diffusion configuration does not match checkpoint: ' + key)
     for key in ('fps_points', 'policy_width', 'time_context'):
         if key in saved and saved[key] != a.get(key, False if key == 'time_context' else None):
@@ -133,7 +138,7 @@ def evaluate_continuous(agent, teacher, paths, cfg, episodes=32, seed=426101,
             rows.append(row)
     macro = {str(h): {k: float(np.mean([r['checkpoints'][str(h)][k] for r in rows if r['band'] != 'zero']))
                       for k in rows[1]['checkpoints'][str(h)]} for h in horizons}
-    return {'seed': seed, 'sampling_seed': sampling_seed if a.get('trainer') == 'diffusion' else None,
+    return {'seed': seed, 'sampling_seed': sampling_seed if a.get('trainer') in ('diffusion', 'diffusion_rl') else None,
             'mode': mode, 'episodes_per_nonzero_band': episodes,
             'horizons': list(horizons), 'error_scales': scales,
             'note': 'Full-budget actions; zero band separate from equally weighted case/band macro. Intermediate checkpoints are prefixes of the longest rollout.',
