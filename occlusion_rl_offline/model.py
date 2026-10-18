@@ -62,7 +62,8 @@ class OcclusionTeacher(nn.Module):
                  contact_threshold=0.15, penetration_threshold=-0.1,
                  stat_clip_mm=3.0, candidate_points=None, point_seed=42,
                  contact_fps_fraction=0.0, contact_fps_max_mm=0.6,
-                 contact_fps_pool_factor=4, sampling_mode='dynamic', distance_method='nearest_vertex'):
+                 contact_fps_pool_factor=4, sampling_mode='dynamic', distance_method='nearest_vertex',
+                 segmentation_region=None):
         super().__init__()
         self.sample_count = sample_count
         self.fps_strength = fps_strength

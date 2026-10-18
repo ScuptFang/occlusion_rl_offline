@@ -7,6 +7,9 @@ from scipy.spatial import cKDTree
 
 def sample_sdf(case, xyz, options=None):
     """Configured signed vertex/surface distance; no volumetric inside/outside test."""
+    if (options or {}).get('segmentation_region'):
+        from .region_segmentation import lower_region
+        case = lower_region(case, options['segmentation_region'])
     if (options or {}).get('distance_method', 'nearest_vertex') == 'nearest_surface':
         from .surface import surface_distance
         return surface_distance(case, xyz)[0]
@@ -47,6 +50,10 @@ def sample_upper_mesh(case, xyz, normal, count, fps_options=None, return_indices
         raise ValueError('Candidate positions and original vertex IDs must match')
     xyz = np.asarray(xyz, dtype=np.float32)
     d = sample_sdf(case, xyz, options) if precomputed_sdf is None else precomputed_sdf
+    if options.get('segmentation_region'):
+        from .region_segmentation import upper_region_mask
+        mask = upper_region_mask(case, xyz, normal, ids, count, options['segmentation_region'])
+        xyz, normal, ids, d = xyz[mask], normal[mask], ids[mask], d[mask]
     absolute = np.abs(d)
     scales = options.get('contact_scales', (0.15, 0.6, 1.5))
     importance = (options.get('weight_floor', 0.15)
@@ -119,6 +126,8 @@ def load_case(path):
         case = {k: f[k].astype(np.float32) for k in required}
         if 'lower_faces' in f:
             case['lower_faces'] = f['lower_faces'].astype(np.int64)
+        if 'lower_curvature' in f:
+            case['lower_curvature'] = f['lower_curvature'].astype(np.float32)
     n = len(case['xyz'])
     assert case['xyz'].shape == (n, 3) and case['normal'].shape == (n, 3)
     assert case['curvature'].shape in ((n,), (n, 1))

@@ -1,5 +1,9 @@
 # occlusion_rl_offline
 
+新增 **5 mm 咬合候选区域 PointTransformer 分割 → teacher → 模仿学习与 diffusion RL**，使用原始顶点标签、随机位姿训练及预测区域推理，见[实验配置与说明](docs/region_point_transformer.md)。
+
+区域流程也支持跳过 teacher 第二阶段校准，重新训练 agent，见 [ranking teacher 对照实验](docs/region_ranking_agent.md)。
+
 新增 **模仿学习 → diffusion 强化学习**：在预训练扩散策略的最后几步去噪上进行 teacher 差分奖励 PPO 微调，见 [配置、算法与对照实验](docs/diffusion_rl.md)。
 
 Teacher 新实验：统一 ranking/calibration 标签、保留分数差监督，并支持最近下颌三角网格表面距离；配置与复测结果见 [teacher 改进实验](docs/teacher_refinement.md)。

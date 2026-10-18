@@ -53,12 +53,11 @@ def prepare_case(upper_path, lower_path, out_path, cfg):
     upper = _mesh(upper_path)
     lower = _mesh(lower_path)
     xyz, normal, curvature = _upper_features(upper)
-    lower_xyz = np.asarray(lower.vertices, dtype=np.float32)
-    lower_normal = np.asarray(lower.vertex_normals, dtype=np.float32)
+    lower_xyz, lower_normal, lower_curvature = _upper_features(lower)
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out, xyz=xyz, normal=normal, curvature=curvature,
-                        lower_xyz=lower_xyz, lower_normal=lower_normal,
+                        lower_xyz=lower_xyz, lower_normal=lower_normal, lower_curvature=lower_curvature,
                         lower_faces=np.asarray(lower.faces, dtype=np.int64))
     case = load_case(out)
     points = xyz[:min(2048, len(xyz))]

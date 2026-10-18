@@ -1,0 +1,6 @@
+{
+  "source_run": "runs/region_point_transformer",
+  "out": "runs/region_ranking_agent",
+  "math_threads": 1,
+  "evaluation_workers": 3
+}

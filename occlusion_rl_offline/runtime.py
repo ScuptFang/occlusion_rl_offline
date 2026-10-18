@@ -21,5 +21,5 @@ def resolve_device(config=None, override=None):
 
 
 def runtime_info(device):
-    return {'device': str(device), 'torch': torch.__version__, 'cuda_runtime': torch.version.cuda,
+    return {'device': str(device), 'torch': str(torch.__version__), 'cuda_runtime': torch.version.cuda,
             'gpu': torch.cuda.get_device_name(device) if str(device).startswith('cuda') else None}

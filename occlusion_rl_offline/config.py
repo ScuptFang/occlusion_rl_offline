@@ -20,6 +20,17 @@ def load_config(path=None):
             raise ValueError('Missing config section: %s' % section)
     if config['model'].get('distance_method', 'nearest_vertex') not in ('nearest_vertex', 'nearest_surface'):
         raise ValueError('Unknown model.distance_method')
+    region = config['model'].get('segmentation_region')
+    if region:
+        if config['model'].get('sampling_mode', 'dynamic') != 'dynamic':
+            raise ValueError('Region segmentation must be recomputed at every pose')
+        if config['model'].get('distance_method') != 'nearest_surface':
+            raise ValueError('Region teacher requires nearest_surface distance')
+        if not 0 < region.get('threshold', .5) < 1 or len(region['sha256']) != 64:
+            raise ValueError('Invalid region threshold/checkpoint hash')
+        for key in ('minimum_lower_faces', 'interpolation_neighbors'):
+            if key in region and (isinstance(region[key], bool) or not isinstance(region[key], int) or region[key] < 1):
+                raise ValueError('segmentation_region.' + key + ' must be a positive integer')
     layers = config['model'].get('encoder_layers', 3)
     if isinstance(layers, bool) or not isinstance(layers, int) or layers < 1:
         raise ValueError('model.encoder_layers must be a positive integer')
