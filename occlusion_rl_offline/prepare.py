@@ -57,6 +57,7 @@ def prepare_case(upper_path, lower_path, out_path, cfg):
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out, xyz=xyz, normal=normal, curvature=curvature,
+                        upper_faces=np.asarray(upper.faces, dtype=np.int64),
                         lower_xyz=lower_xyz, lower_normal=lower_normal, lower_curvature=lower_curvature,
                         lower_faces=np.asarray(lower.faces, dtype=np.int64))
     case = load_case(out)
@@ -72,6 +73,7 @@ def prepare_case(upper_path, lower_path, out_path, cfg):
              'upper_watertight': bool(upper.is_watertight),
              'lower_watertight': bool(lower.is_watertight),
              'upper_points': len(xyz), 'upper_point_source': 'mesh_vertices',
+             'upper_faces': len(upper.faces),
              'upper_normal_source': 'mesh_vertex_normals',
              'upper_curvature_method': 'cotangent_laplacian_mean_curvature',
              'lower_points': len(lower_xyz),

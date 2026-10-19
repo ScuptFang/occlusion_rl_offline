@@ -12,6 +12,7 @@ from occlusion_rl_offline.config import load_config, resolve
 from occlusion_rl_offline.data import load_case, candidate_indices, sample_sdf
 from occlusion_rl_offline.evaluation import BANDS
 from occlusion_rl_offline.rl import load_teacher, teacher_score, action_steps
+from occlusion_rl_offline.region_mesh import enabled, upper_mesh_candidates
 
 
 def digest(path):
@@ -25,10 +26,19 @@ def main():
     p.add_argument('--evaluation', default='runs/region_ranking_agent/rl/test/agent')
     p.add_argument('--sampling-seed', type=int, default=91001)
     p.add_argument('--out', default='demo/ranking_recovery_data.js')
+    p.add_argument('--examples-per-band', type=int, default=32,
+                   help='Show the first N episodes in each band, never select by outcome')
     args = p.parse_args()
+    if not 1 <= args.examples_per_band <= 32:
+        p.error('examples-per-band must be between 1 and 32')
     cfg = load_config(args.config); a = cfg['agent']; torch.set_num_threads(4)
     evaluation = resolve(args.evaluation)
-    comparison = json.loads((evaluation / 'comparison.json').read_text())
+    # A completed seed can be replayed while other frozen-policy seeds are still
+    # evaluating; both files contain the same locked checkpoint/config identity.
+    identity = evaluation / 'comparison.json'
+    if not identity.exists():
+        identity = evaluation / 'locked_checkpoints.json'
+    comparison = json.loads(identity.read_text())
     manifest = resolve(args.manifest)
     assert comparison['manifest_sha256'] == digest(manifest)
     assert comparison['config']['model'] == cfg['model']
@@ -49,6 +59,10 @@ def main():
         action_rotation_step_deg=a['action_rotation_step_deg'],
         action_translation_step_mm=a['action_translation_step_mm'],
         checkpoint_sha256={key: comparison[key + '_sha256'] for key in ('teacher', 'agent')})
+    if enabled(cfg['model']):
+        payload.update(title='原网格咬合区域 · %d 候选 / %d 点恢复' % (cfg['model']['candidate_points'], a['fps_points']),
+            subtitle='010 / 011 未参与训练。展示各档前 %d 个随机起点及正确位姿；没有按恢复效果筛选。' % args.examples_per_band,
+            mesh_before_sampling=True, candidate_points=cfg['model']['candidate_points'])
     max_score_difference = 0.; action_count = negative_count = 0
     for case_id, path in test.items():
         case = load_case(path); pivot = case['xyz'].mean(0)
@@ -59,8 +73,12 @@ def main():
             return np.round(vertices[ids], 3).tolist()
         payload['cases'][case_id] = dict(pivot=pivot.tolist(), upper=display_vertices('xyz'),
             lower=display_vertices('lower_xyz'), upper_mesh_vertices=len(case['xyz']),
-            candidate_upper=np.round(case['xyz'][candidate_indices(case, cfg['model'])], 3).tolist())
+            candidate_upper=[] if enabled(cfg['model']) else np.round(case['xyz'][candidate_indices(case, cfg['model'])], 3).tolist())
         for row in [r for r in traces['cases'] if r['case'] == case_id]:
+            count = min(row['episodes'], args.examples_per_band)
+            row = dict(row, episodes=count,
+                       trace=[{k: v[:count] if isinstance(v, list) else v for k, v in f.items()}
+                              for f in row['trace']])
             np.testing.assert_array_equal(pivot, row['pivot'])
             band = next(b for b in BANDS if b[0] == row['band'])
             episodes = [[] for _ in range(row['episodes'])]
@@ -87,13 +105,20 @@ def main():
                     action_count += len(action)
                     negative_count += int((np.asarray(frame['teacher_score']) < previous['teacher_score']).sum())
                 for i in range(row['episodes']):
+                    region_detail = {}
+                    if enabled(cfg['model']):
+                        candidates = upper_mesh_candidates(case, cfg['model'], r[i], t[i])
+                        assert np.isin(ids[i], candidates).all(), 'Recorded FPS vertices escaped the recovered region candidates'
+                        preview = (case['xyz'][candidates[:512]] - pivot) @ r[i].T + pivot + t[i]
+                        region_detail = dict(candidate_count=len(candidates), candidate_preview_points=np.round(preview,3).tolist(),
+                            region_vertices=case['_upper_region_audit']['vertices'], region_faces=case['_upper_region_audit']['faces'])
                     episodes[i].append(dict(rotation=r[i].reshape(-1).tolist(), translation=t[i].tolist(),
                         rotation_error=frame['rotation_deg'][i], translation_error=frame['translation_mm'][i],
                         teacher_logit=frame['teacher_score'][i], selected_indices=ids[i].tolist(),
                         selected_points=np.round(xyz[i], 3).tolist(), selected_sdf=np.round(sdf[i], 4).tolist(),
                         action=previous['action'][i] if previous else None,
                         accepted_action=True if previous else None,
-                        rotation_step_deg=rs if previous else None, translation_step_mm=ts if previous else None))
+                        rotation_step_deg=rs if previous else None, translation_step_mm=ts if previous else None, **region_detail))
             for i, steps in enumerate(episodes):
                 payload['trajectories'].append(dict(case_id=case_id, band_name=band[0],
                     band=dict(rotation_deg=band[1], translation_mm=band[2]),

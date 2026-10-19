@@ -28,7 +28,9 @@ def load_config(path=None):
             raise ValueError('Region teacher requires nearest_surface distance')
         if not 0 < region.get('threshold', .5) < 1 or len(region['sha256']) != 64:
             raise ValueError('Invalid region threshold/checkpoint hash')
-        for key in ('minimum_lower_faces', 'interpolation_neighbors'):
+        if region.get('face_rule', 'all') not in ('all', 'mean'):
+            raise ValueError('Unknown segmentation face_rule')
+        for key in ('minimum_lower_faces', 'minimum_upper_faces', 'interpolation_neighbors'):
             if key in region and (isinstance(region[key], bool) or not isinstance(region[key], int) or region[key] < 1):
                 raise ValueError('segmentation_region.' + key + ' must be a positive integer')
     layers = config['model'].get('encoder_layers', 3)

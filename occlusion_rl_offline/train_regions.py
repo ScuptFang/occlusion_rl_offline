@@ -62,6 +62,7 @@ def prepare(cfg):
             dest = out / 'prepared' / 'cases' / entry['id']; dest.mkdir(parents=True, exist_ok=True)
             # Downstream teacher/agent case deliberately contains NO reference labels.
             np.savez_compressed(dest / 'case.npz', xyz=ux, normal=un, curvature=uc,
+                                upper_faces=np.asarray(upper.faces, dtype=np.int64),
                                 lower_xyz=lx, lower_normal=ln, lower_curvature=lc,
                                 lower_faces=np.asarray(lower.faces, dtype=np.int64))
             np.savez_compressed(dest / 'region_labels.npz', upper=uy, lower=ly,

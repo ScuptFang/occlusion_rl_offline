@@ -1,0 +1,13 @@
+{
+  "out": "runs/region_mesh10240_fps256",
+  "source_config": "runs/region_ranking_agent/teacher_agent_config.json",
+  "source_rl_config": "runs/region_ranking_agent/diffusion_rl_config.json",
+  "source_manifest": "configs/filtered8_manifest.json",
+  "data_root": "../data",
+  "candidate_points": 10240,
+  "fps_points": 256,
+  "face_rule": "all",
+  "minimum_upper_faces": 128,
+  "math_threads": 1,
+  "evaluation_workers": 3
+}

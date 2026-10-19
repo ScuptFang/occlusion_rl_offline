@@ -4,6 +4,8 @@
 
 区域流程也支持跳过 teacher 第二阶段校准，重新训练 agent，见 [ranking teacher 对照实验](docs/region_ranking_agent.md)。
 
+最新采样实验：分割后恢复原 STL 区域顶点和三角面，再抽取 **10240 个候选顶点 → 256 个距离加权 FPS 点**，见 [原网格区域训练与 demo](docs/region_mesh10240_fps256.md)。
+
 新增 **模仿学习 → diffusion 强化学习**：在预训练扩散策略的最后几步去噪上进行 teacher 差分奖励 PPO 微调，见 [配置、算法与对照实验](docs/diffusion_rl.md)。
 
 Teacher 新实验：统一 ranking/calibration 标签、保留分数差监督，并支持最近下颌三角网格表面距离；配置与复测结果见 [teacher 改进实验](docs/teacher_refinement.md)。

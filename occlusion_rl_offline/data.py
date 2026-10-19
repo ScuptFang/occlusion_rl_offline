@@ -8,8 +8,12 @@ from scipy.spatial import cKDTree
 def sample_sdf(case, xyz, options=None):
     """Configured signed vertex/surface distance; no volumetric inside/outside test."""
     if (options or {}).get('segmentation_region'):
-        from .region_segmentation import lower_region
-        case = lower_region(case, options['segmentation_region'])
+        from .region_mesh import enabled, lower_mesh_region
+        if enabled(options):
+            case = lower_mesh_region(case, options['segmentation_region'])
+        else:
+            from .region_segmentation import lower_region
+            case = lower_region(case, options['segmentation_region'])
     if (options or {}).get('distance_method', 'nearest_vertex') == 'nearest_surface':
         from .surface import surface_distance
         return surface_distance(case, xyz)[0]
@@ -43,14 +47,18 @@ def sample_upper_mesh(case, xyz, normal, count, fps_options=None, return_indices
     candidate_count = int(options.get('candidate_points', len(case['xyz'])))
     if count < 1 or candidate_count < count or candidate_count > len(case['xyz']):
         raise ValueError('Require fps_points <= candidate_points <= upper mesh vertices')
-    ids = candidate_indices(case, options) if preselected_ids is None else preselected_ids
+    from .region_mesh import enabled, upper_mesh_candidates
+    if preselected_ids is None and enabled(options):
+        ids = upper_mesh_candidates(case, options, xyz=xyz, normal=normal)
+    else:
+        ids = candidate_indices(case, options) if preselected_ids is None else preselected_ids
     if preselected_ids is None:
         xyz, normal = xyz[ids], normal[ids]
     if len(xyz) != len(ids):
         raise ValueError('Candidate positions and original vertex IDs must match')
     xyz = np.asarray(xyz, dtype=np.float32)
     d = sample_sdf(case, xyz, options) if precomputed_sdf is None else precomputed_sdf
-    if options.get('segmentation_region'):
+    if options.get('segmentation_region') and not enabled(options):
         from .region_segmentation import upper_region_mask
         mask = upper_region_mask(case, xyz, normal, ids, count, options['segmentation_region'])
         xyz, normal, ids, d = xyz[mask], normal[mask], ids[mask], d[mask]
@@ -101,8 +109,10 @@ def sample_upper_mesh(case, xyz, normal, count, fps_options=None, return_indices
 
 
 def features_at_pose(case, rotation, translation, count, options=None, return_indices=False):
-    """Transform only fixed candidates; preserve full-mesh pivot and vertex identity."""
-    ids = candidate_indices(case, options)
+    """Select candidates for this pose; preserve full-mesh pivot and vertex identity."""
+    from .region_mesh import enabled, upper_mesh_candidates
+    ids = (upper_mesh_candidates(case, options, rotation, translation) if enabled(options)
+           else candidate_indices(case, options))
     if '_pivot' not in case:
         case['_pivot'] = case['xyz'].mean(0)
     pivot = case['_pivot']
@@ -126,6 +136,8 @@ def load_case(path):
         case = {k: f[k].astype(np.float32) for k in required}
         if 'lower_faces' in f:
             case['lower_faces'] = f['lower_faces'].astype(np.int64)
+        if 'upper_faces' in f:
+            case['upper_faces'] = f['upper_faces'].astype(np.int64)
         if 'lower_curvature' in f:
             case['lower_curvature'] = f['lower_curvature'].astype(np.float32)
     n = len(case['xyz'])

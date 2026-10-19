@@ -34,6 +34,13 @@ class PoseTask:
         self.episode_ids = None
 
     def points_at(self, rotations, translations):
+        from .region_mesh import enabled
+        if enabled(self.fps_options):
+            from .data import features_at_pose
+            selected = [features_at_pose(self.case, r, t, self.points, self.fps_options, True)
+                        for r, t in zip(rotations, translations)]
+            self.last_ids = np.asarray([item[1] for item in selected])
+            return np.asarray([item[0] for item in selected], dtype=np.float32)
         fixed = (self.fps_options or {}).get('sampling_mode') == 'episode_fixed'
         if fixed and self.episode_ids is not None:
             if len(self.episode_ids) != len(rotations):

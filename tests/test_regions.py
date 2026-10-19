@@ -36,7 +36,7 @@ class RegionTests(unittest.TestCase):
             for paths in read_manifest(root / 'out/manifest.json').values():
                 with np.load(paths[0]) as data:
                     self.assertEqual(set(data.files), {'xyz', 'normal', 'curvature', 'lower_xyz',
-                                                     'lower_normal', 'lower_curvature', 'lower_faces'})
+                                                     'lower_normal', 'lower_curvature', 'lower_faces', 'upper_faces'})
                 self.assertTrue((paths[0].parent / 'region_labels.npz').is_file())
 
     def test_training_checkpoint_can_be_used_for_inference(self):
