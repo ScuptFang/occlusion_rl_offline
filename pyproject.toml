@@ -19,7 +19,11 @@ dependencies = [
 occlusion-rl = "occlusion_rl_offline.cli:main"
 
 [project.optional-dependencies]
+semantic = ["vtk>=9.3,<9.5"]
 report = ["matplotlib>=3.7,<3.10"]
 
 [tool.setuptools.packages.find]
 include = ["occlusion_rl_offline*"]
+
+[tool.setuptools.package-data]
+"occlusion_rl_offline.semantic_pipeline" = ["assets/*.html", "assets/*.js", "assets/*.css"]

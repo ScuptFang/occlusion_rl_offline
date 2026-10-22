@@ -65,6 +65,8 @@ def collect(cfg, manifest, out):
                 executed = np.where(random_mask, random_action, target[:, 0])
                 r, t, points, _ = task.move(r, t, executed)
         print('collected', path.parent.name, d['episodes_per_case'] * a['horizon'], flush=True)
+    from .data import pad_point_batches
+    observations = pad_point_batches(observations)
     arrays = {k: np.concatenate(v).astype(np.float32) for k, v in
               [('observations', observations), ('contexts', contexts), ('actions', actions)]}
     np.savez(cache, **arrays)

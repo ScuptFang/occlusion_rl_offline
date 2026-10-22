@@ -45,7 +45,10 @@ class LocalAttention(nn.Module):
 
     def forward(self, xyz, feat):
         b, n, _ = xyz.shape
-        idx = torch.cdist(xyz, xyz).topk(min(self.k, n), largest=False).indices
+        # Chunk exact KNN queries to avoid a full N x N distance allocation.
+        with torch.no_grad():
+            idx = torch.cat([torch.cdist(q, xyz).topk(min(self.k, n), largest=False).indices
+                             for q in xyz.split(256, dim=1)], dim=1)
         batch = torch.arange(b, device=xyz.device)[:, None, None]
         neighbor = feat[batch, idx]
         delta = xyz[batch, idx] - xyz[:, :, None]
@@ -63,8 +66,9 @@ class OcclusionTeacher(nn.Module):
                  stat_clip_mm=3.0, candidate_points=None, point_seed=42,
                  contact_fps_fraction=0.0, contact_fps_max_mm=0.6,
                  contact_fps_pool_factor=4, sampling_mode='dynamic', distance_method='nearest_vertex',
-                 segmentation_region=None):
+                 segmentation_region=None, candidate_source="uniform"):
         super().__init__()
+        self.all_mesh = candidate_source == "all_mesh"
         self.sample_count = sample_count
         self.fps_strength = fps_strength
         self.contact_scales = tuple(contact_scales)
@@ -79,8 +83,13 @@ class OcclusionTeacher(nn.Module):
         self.head = nn.Sequential(nn.Linear(width * 5 + 4, width), nn.ReLU(), nn.Linear(width, 1))
 
     def encode(self, points, pooling_override=None):
+        if torch.isnan(points).any():
+            valid = torch.isfinite(points).all(-1)
+            if not valid.any(-1).all():
+                raise ValueError('Empty point cloud')
+            return torch.cat([self.encode(p[m][None], pooling_override) for p, m in zip(points, valid)])
         xyz, d = points[:, :, :3], points[:, :, 7]
-        if points.shape[1] != self.sample_count:
+        if not self.all_mesh and points.shape[1] != self.sample_count:
             raise ValueError('Expected %d candidate-FPS points, got %d' %
                              (self.sample_count, points.shape[1]))
         x = points

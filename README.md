@@ -1,3 +1,5 @@
+本分支实验：[全顶点 Ranking + Diffusion（2026-10-21）](docs/experiments/semantic_all_vertices_20261021.md)。数据与模型需本地准备，推荐从该实验说明运行。
+
 # occlusion_rl_offline
 
 新增 **5 mm 咬合候选区域 PointTransformer 分割 → teacher → 模仿学习与 diffusion RL**，使用原始顶点标签、随机位姿训练及预测区域推理，见[实验配置与说明](docs/region_point_transformer.md)。
@@ -113,3 +115,5 @@ Teacher 位姿评分可视化：[打开评分视图](demo/teacher_scores.html)�
 模仿学习课程的[128 点 / PPO 宽度 512 扩容配置与测试](docs/reagent_capacity.md)使用 `configs/reagent_curriculum_large.json`，保留原 64 点 / 宽度 128 配置作同起点对照。
 
 [逐步 Diffusion Policy 实验](docs/diffusion_policy.md)使用 `configs/diffusion_policy.json`：从当前点云去噪预测 4 步动作，每次只执行首步再重规划，保存完整逐步轨迹，并与相同 128 点输入的 PPO 对照。
+
+独立的体素语义分割 → 原网格反映射/简面 → 五档 teacher → 模仿预训练＋混合奖励 diffusion RL，见 [semantic pipeline](docs/semantic_pipeline.md)。入口：`python -m occlusion_rl_offline.semantic_pipeline`。

@@ -22,6 +22,11 @@ def sha(path):
 
 def run(cfg, manifest, teacher_path, source, out, resume=None):
     a = cfg['agent']; o = a['diffusion_rl']; device = resolve_device(cfg)
+    curriculum = o.get('trajectory_curriculum')
+    if curriculum:
+        from .semantic_pipeline.rewards import validate as validate_reward, trajectory_reward
+        validate_reward(curriculum)
+        if o['iterations'] < 2: raise ValueError('Reward curriculum needs at least two iterations')
     for k in ['iterations', 'parallel_envs', 'ppo_epochs', 'minibatch', 'validate_every']:
         if isinstance(o[k], bool) or not isinstance(o[k], int) or o[k] < 1:
             raise ValueError('Positive integer required: ' + k)
@@ -98,7 +103,7 @@ def run(cfg, manifest, teacher_path, source, out, resume=None):
         if len(cache) > 2: cache.popitem(last=False)
         task = cache[path]; task.rng = np.random.RandomState(a['seed'] + iteration * 1009)
         r, t, points = task.reset(o['parallel_envs'], a['training_pose_bands'])
-        scores = teacher_score(teacher, points, device); rollout = []; negative = 0
+        scores = teacher_score(teacher, points, device); rollout = []; negative = 0; reward_audit = []
         for step in range(a['horizon']):
             obs = task.observation(points); context = step_context(agent, len(points), step, a['horizon'], device)
             plan, before, after, lp, value = agent.sample_chain(obs, context)
@@ -107,7 +112,14 @@ def run(cfg, manifest, teacher_path, source, out, resume=None):
                                        plan[:, 0].cpu().numpy(), teacher, False)
             if not np.all(valid) or not np.all(accepted):
                 raise RuntimeError('Unexpected invalid/rejected diffusion action')
-            reward = torch.as_tensor((ns - scores) * o['reward_scale'], device=device, dtype=torch.float32)
+            if curriculum:
+                mixed, expert, teacher_delta, ew, tw = trajectory_reward(
+                    r, t, nr, nt, scores, ns, task.rotation_step_deg, task.translation_step_mm,
+                    curriculum, iteration, o['iterations'])
+                reward_audit.append([float(expert.mean()), float(teacher_delta.mean()), ew, tw])
+            else:
+                mixed = (ns - scores) * o['reward_scale']
+            reward = torch.as_tensor(mixed, device=device, dtype=torch.float32)
             negative += int((ns < scores).sum())
             rollout.append((obs, context, before, after, lp, value, reward))
             r, t, points, scores = nr, nt, np_, ns
@@ -137,6 +149,9 @@ def run(cfg, manifest, teacher_path, source, out, resume=None):
                'score_decreasing_actions': negative, 'optimizer_updates': len(stats),
                'ppo': dict(zip(['policy_loss', 'value_loss', 'approx_kl', 'clip_fraction', 'reference_kl'],
                               np.mean(stats, axis=0).tolist() if stats else [None] * 5))}
+        if reward_audit:
+            row['reward_components'] = dict(zip(['expert_mean', 'teacher_delta_mean', 'expert_weight', 'teacher_weight'],
+                                                 np.mean(reward_audit, axis=0).tolist()))
         if (iteration + 1) % o['validate_every'] == 0 or iteration + 1 == o['iterations']:
             result = validate(); metric = result['macro'][str(a['horizon'])]['error']; row['validation'] = result
             improved = metric < best; overall_improved = metric < overall_best

@@ -75,6 +75,8 @@ def build_bank(paths, cfg, count, seed, cache):
                                ('rotation', [r, r2]), ('translation', [t, t2])]:
                 result[key].append(value)
         print(json.dumps({'bank_case': path.parent.name, 'pairs': count, 'cache': str(cache)}), flush=True)
+    from .data import pad_point_batches
+    result['x'] = pad_point_batches([np.asarray(v) for v in result['x']])
     result = {k: np.asarray(v, dtype=np.float32 if k in ('x', 'y') else None) for k, v in result.items()}
     cache.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(cache, signature=signature, **result)
@@ -98,6 +100,8 @@ def pair_loss(pred, target, options, stage):
 @torch.no_grad()
 def predict(model, bank, device, batch=64):
     model.eval()
+    if model.all_mesh:
+        batch = min(batch, 2)
     flat = torch.from_numpy(bank['x'].reshape(-1, *bank['x'].shape[2:]))
     return torch.cat([model(x.to(device)).cpu() for x in flat.split(batch)]).numpy().reshape(-1, 2)
 
@@ -136,7 +140,7 @@ def selection(m, options=None):
     return w[0] * m['mae'] + w[1] * m['delta_mae'] + w[2] * (1 - m['local_accuracy'])
 
 
-def train(cfg, manifest, out):
+def train(cfg, manifest, out, stages=('ranking', 'calibration')):
     torch.set_num_threads(cfg['agent'].get('torch_threads', 4))
     seed = cfg['teacher']['seed']
     torch.manual_seed(seed)
@@ -150,7 +154,7 @@ def train(cfg, manifest, out):
     val_bank = build_bank(split['val'], cfg, o['validation_pairs_per_case'], seed + 100000, out / 'banks/val.npz')
     model = OcclusionTeacher(sample_count=cfg['teacher']['fps_points'], **cfg['model']).to(device)
     x, y = torch.from_numpy(train_bank['x']), torch.from_numpy(train_bank['y'])
-    for stage in ('ranking', 'calibration'):
+    for stage in stages:
         stage_out = out / stage; stage_out.mkdir(exist_ok=True)
         optimizer = torch.optim.AdamW(model.parameters(), lr=cfg['teacher'][stage + '_lr'],
                                       weight_decay=cfg['teacher'][stage + '_weight_decay'])

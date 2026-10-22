@@ -42,6 +42,8 @@ def load_config(path=None):
             raise ValueError('%s.fps_points must be a positive integer' % stage)
     if config['teacher']['fps_points'] != config['agent']['fps_points']:
         raise ValueError('Teacher and agent point densities must match for this experiment')
+    if config['model'].get('candidate_source', 'uniform') not in ('uniform', 'all_mesh'):
+        raise ValueError('model.candidate_source must be uniform or all_mesh')
     candidates = config['model'].get('candidate_points', 4096)
     if config['model'].get('sampling_mode','dynamic') not in ('dynamic','episode_fixed'):
         raise ValueError('model.sampling_mode must be dynamic or episode_fixed')

@@ -29,7 +29,8 @@ def sample_sdf(case, xyz, options=None):
 
 def candidate_indices(case, options=None):
     options = options or {}
-    count = int(options.get('candidate_points', len(case['xyz'])))
+    count = (len(case['xyz']) if options.get('candidate_source') == 'all_mesh'
+             else int(options.get('candidate_points', len(case['xyz']))))
     if not 1 <= count <= len(case['xyz']):
         raise ValueError('candidate_points must fit the upper mesh')
     key = (count, int(options.get('point_seed', 42)))
@@ -44,7 +45,10 @@ def sample_upper_mesh(case, xyz, normal, count, fps_options=None, return_indices
                       preselected_ids=None, precomputed_sdf=None):
     """Uniformly select mesh-vertex candidates, then distance-weighted FPS."""
     options = fps_options or {}
-    candidate_count = int(options.get('candidate_points', len(case['xyz'])))
+    candidate_count = (len(case['xyz']) if options.get('candidate_source') == 'all_mesh'
+                       else int(options.get('candidate_points', len(case['xyz']))))
+    if options.get('candidate_source') == 'all_mesh':
+        count = candidate_count
     if count < 1 or candidate_count < count or candidate_count > len(case['xyz']):
         raise ValueError('Require fps_points <= candidate_points <= upper mesh vertices')
     from .region_mesh import enabled, upper_mesh_candidates
@@ -62,6 +66,9 @@ def sample_upper_mesh(case, xyz, normal, count, fps_options=None, return_indices
         from .region_segmentation import upper_region_mask
         mask = upper_region_mask(case, xyz, normal, ids, count, options['segmentation_region'])
         xyz, normal, ids, d = xyz[mask], normal[mask], ids[mask], d[mask]
+    if options.get('candidate_source') == 'all_mesh':
+        features = np.column_stack((xyz, normal, case['curvature'][ids].reshape(-1), d)).astype(np.float32)
+        return (features, ids) if return_indices else features
     absolute = np.abs(d)
     scales = options.get('contact_scales', (0.15, 0.6, 1.5))
     importance = (options.get('weight_floor', 0.15)
@@ -243,3 +250,14 @@ class CaseBlockSampler(Sampler):
             block = np.arange(start, min(start + self.block_size, self.length))
             rng.shuffle(block)
             yield from block.tolist()
+
+
+def pad_point_batches(batches):
+    """Pad only for storage/batching; NaN rows are removed before encoding."""
+    size = max(x.shape[-2] for x in batches)
+    result = []
+    for x in batches:
+        widths = [(0, 0)] * x.ndim
+        widths[-2] = (0, size - x.shape[-2])
+        result.append(np.pad(x, widths, constant_values=np.nan))
+    return result

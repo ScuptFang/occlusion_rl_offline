@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "seed": 42,
+  "validation_fraction": 0.17,
+  "test_fraction": 0.17,
+  "splits": {
+    "train": [
+      {
+        "id": "003",
+        "case": "../runs/teacher_refinement/prepared/cases/003/case.npz"
+      },
+      {
+        "id": "002",
+        "case": "../runs/teacher_refinement/prepared/cases/002/case.npz"
+      },
+      {
+        "id": "005",
+        "case": "../runs/teacher_refinement/prepared/cases/005/case.npz"
+      },
+      {
+        "id": "004",
+        "case": "../runs/teacher_refinement/prepared/cases/004/case.npz"
+      },
+      {
+        "id": "007",
+        "case": "../runs/teacher_refinement/prepared/cases/007/case.npz"
+      },
+      {
+        "id": "010",
+        "case": "../runs/teacher_refinement/prepared/cases/010/case.npz"
+      }
+    ],
+    "val": [
+      {
+        "id": "006",
+        "case": "../runs/teacher_refinement/prepared/cases/006/case.npz"
+      }
+    ],
+    "test": [
+      {
+        "id": "011",
+        "case": "../runs/teacher_refinement/prepared/cases/011/case.npz"
+      }
+    ]
+  },
+  "excluded_case_ids": [
+    "001",
+    "008",
+    "009"
+  ]
+}
